@@ -1,7 +1,8 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.models import Project, Task
+from app.models import Project, Task, User
+from app.schemas.project import ProjectCreate
 
 
 def get(db: Session, project_id: int) -> Project | None:
@@ -35,3 +36,11 @@ def list_projects(db: Session) -> list[Project]:
         .order_by(Project.id)
     )
     return list(db.scalars(stmt).all())
+
+
+def create(db: Session, data: ProjectCreate, owner: User) -> Project:
+    project = Project(**data.model_dump(), owner=owner)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return project

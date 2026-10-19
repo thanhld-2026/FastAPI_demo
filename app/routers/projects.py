@@ -3,9 +3,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app import crud
-from app.dependencies import DbSession, get_project_or_404, load_tags_or_400
+from app.dependencies import CurrentUser, DbSession, get_project_or_404, load_tags_or_400
 from app.models import Project
-from app.schemas.project import ProjectDetail, ProjectOut
+from app.schemas.project import ProjectCreate, ProjectDetail, ProjectOut
 from app.schemas.task import TaskCreate, TaskOut
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
@@ -14,6 +14,16 @@ router = APIRouter(prefix="/api/projects", tags=["Projects"])
 @router.get("", response_model=list[ProjectOut], summary="Danh sách project")
 def list_projects(db: DbSession):
     return crud.project.list_projects(db)
+
+
+@router.post(
+    "",
+    response_model=ProjectOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Tạo project (người tạo trở thành PM)",
+)
+def create_project(data: ProjectCreate, current_user: CurrentUser, db: DbSession):
+    return crud.project.create(db, data, owner=current_user)
 
 
 @router.get(
@@ -42,10 +52,8 @@ def list_project_tasks(project: Annotated[Project, Depends(get_project_or_404)],
 def create_project_task(
     data: TaskCreate,
     project: Annotated[Project, Depends(get_project_or_404)],
+    current_user: CurrentUser,
     db: DbSession,
 ):
-    creator = crud.user.get_by_id(db, data.creator_id)
-    if creator is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Creator not found")
     tags = load_tags_or_400(db, data.tag_ids)
-    return crud.task.create(db, project=project, data=data, tags=tags, creator=creator)
+    return crud.task.create(db, project=project, data=data, tags=tags, creator=current_user)

@@ -20,9 +20,6 @@ class TaskCreate(InputSchema):
     priority: TaskPriority = TaskPriority.MEDIUM
     due_date: date | None = None
     tag_ids: TagIds = Field(default_factory=list, examples=[[1, 2]])
-    # Tạm thời: chưa có đăng nhập nên client tự gửi id người tạo task.
-    # Mục 4 (JWT) sẽ bỏ field này và lấy người tạo từ user đang đăng nhập.
-    creator_id: int = Field(examples=[2])
 
 
 class TaskUpdate(InputSchema):

@@ -33,8 +33,7 @@ def list_for_project(db: Session, project_id: int) -> list[Task]:
 def create(
     db: Session, *, project: Project, data: TaskCreate, tags: list[Tag], creator: User
 ) -> Task:
-    values = data.model_dump(exclude={"tag_ids", "creator_id"})
-    task = Task(**values, project=project, creator=creator, tags=tags)
+    task = Task(**data.model_dump(exclude={"tag_ids"}), project=project, creator=creator, tags=tags)
     db.add(task)
     db.commit()
     return get(db, task.id)
