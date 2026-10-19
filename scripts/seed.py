@@ -76,19 +76,19 @@ def seed() -> None:
 
         today = date.today()
         task_specs = [
-            # project, title, status, priority, creator, assignee, due_in_days
-            (backend, "Thiết kế database & ERD", TaskStatus.DONE, TaskPriority.HIGH, "alice", "carol", -7),
-            (backend, "API đăng ký / đăng nhập JWT", TaskStatus.DONE, TaskPriority.HIGH, "alice", "carol", -3),
-            (backend, "Phân quyền PM / Admin", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, "alice", "dave", 2),
-            (backend, "Cache danh sách tag bằng Redis", TaskStatus.TODO, TaskPriority.MEDIUM, "carol", None, 5),
-            (backend, "Viết integration test", TaskStatus.TODO, TaskPriority.MEDIUM, "alice", "dave", 7),
-            (backend, "Fix lỗi 500 khi token hết hạn", TaskStatus.TODO, TaskPriority.HIGH, "dave", None, 1),
-            (mobile, "Màn hình đăng nhập", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, "bob", "carol", 3),
-            (mobile, "Danh sách task theo project", TaskStatus.TODO, TaskPriority.MEDIUM, "bob", None, 10),
-            (mobile, "Push notification khi có comment", TaskStatus.TODO, TaskPriority.LOW, "bob", "dave", 14),
+            # project, title, status, priority, creator, assignee, tags, due_in_days
+            (backend, "Thiết kế database & ERD", TaskStatus.DONE, TaskPriority.HIGH, "alice", "carol", ["backend", "docs"], -7),
+            (backend, "API đăng ký / đăng nhập JWT", TaskStatus.DONE, TaskPriority.HIGH, "alice", "carol", ["backend", "feature"], -3),
+            (backend, "Phân quyền PM / Admin", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, "alice", "dave", ["backend", "feature"], 2),
+            (backend, "Cache danh sách tag bằng Redis", TaskStatus.TODO, TaskPriority.MEDIUM, "carol", None, ["backend"], 5),
+            (backend, "Viết integration test", TaskStatus.TODO, TaskPriority.MEDIUM, "alice", "dave", ["backend", "docs"], 7),
+            (backend, "Fix lỗi 500 khi token hết hạn", TaskStatus.TODO, TaskPriority.HIGH, "dave", None, ["bug", "urgent"], 1),
+            (mobile, "Màn hình đăng nhập", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, "bob", "carol", ["mobile", "frontend"], 3),
+            (mobile, "Danh sách task theo project", TaskStatus.TODO, TaskPriority.MEDIUM, "bob", None, ["mobile", "feature"], 10),
+            (mobile, "Push notification khi có comment", TaskStatus.TODO, TaskPriority.LOW, "bob", "dave", ["mobile"], 14),
         ]
 
-        for project, title, status, priority, creator, assignee, due_in in task_specs:
+        for project, title, status, priority, creator, assignee, tag_names, due_in in task_specs:
             task = Task(
                 project=project,
                 title=title,
@@ -96,6 +96,7 @@ def seed() -> None:
                 priority=priority,
                 creator=users[creator],
                 assignee=users[assignee] if assignee else None,
+                tags=[tags[name] for name in tag_names],
                 due_date=today + timedelta(days=due_in),
             )
             db.add(task)

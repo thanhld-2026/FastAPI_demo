@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import Field, model_validator
 
 from app.schemas.common import InputSchema, ORMSchema
+from app.schemas.task import TaskBrief
 from app.schemas.user import UserPublic
 
 
@@ -36,3 +37,9 @@ class ProjectOut(ORMSchema):
     owner: UserPublic  # nested model: PM của project
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectDetail(ProjectOut):
+    """Project kèm danh sách task (nested), mỗi task kèm assignee (nested 2 cấp)."""
+
+    tasks: list[TaskBrief]

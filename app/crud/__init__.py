@@ -5,6 +5,6 @@ Quy ước:
 - Router gọi crud, sau đó tự quyết định trả 404 / 403 / 409 ...
 """
 
-from app.crud import project, tag
+from app.crud import project, tag, task, user
 
-__all__ = ["project", "tag"]
+__all__ = ["project", "tag", "task", "user"]

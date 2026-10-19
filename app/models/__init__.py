@@ -4,6 +4,7 @@
 2. Alembic (alembic/env.py) chỉ cần `import app.models` là thấy đủ bảng khi autogenerate.
 """
 
+from app.models.associations import task_tags
 from app.models.comment import Comment
 from app.models.enums import TaskPriority, TaskStatus, UserRole
 from app.models.project import Project
@@ -20,4 +21,5 @@ __all__ = [
     "TaskStatus",
     "User",
     "UserRole",
+    "task_tags",
 ]
