@@ -3,16 +3,13 @@
 Chạy local:  uvicorn app.main:app --reload
 """
 
-from typing import Annotated
-
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database import get_db
-from app.routers import projects, tasks, users
+from app.dependencies import DbSession
+from app.routers import projects, tags, tasks, users
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -25,6 +22,7 @@ app = FastAPI(
 app.include_router(users.router)
 app.include_router(projects.router)
 app.include_router(tasks.router)
+app.include_router(tags.router)
 
 
 @app.get("/", include_in_schema=False)
@@ -33,6 +31,6 @@ def root():
 
 
 @app.get("/health", tags=["Health"], summary="Kiểm tra app + kết nối database")
-def health(db: Annotated[Session, Depends(get_db)]):
+def health(db: DbSession):
     db.execute(text("SELECT 1"))
     return {"status": "ok", "database": "ok"}
