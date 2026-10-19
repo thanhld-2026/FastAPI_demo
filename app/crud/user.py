@@ -1,8 +1,8 @@
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Task, User, UserRole
-from app.schemas.user import UserCreate, UserUpdate
+from app.schemas.user import AdminUserUpdate, UserCreate, UserUpdate
 from app.security import DUMMY_HASH, hash_password, verify_password
 
 
@@ -45,6 +45,14 @@ def update(db: Session, user: User, data: UserUpdate) -> User:
     return user
 
 
+def admin_update(db: Session, user: User, data: AdminUserUpdate) -> User:
+    for field, value in data.model_dump(exclude_unset=True, exclude_none=True).items():
+        setattr(user, field, value)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def authenticate(db: Session, identifier: str, password: str) -> User | None:
     """Đăng nhập bằng username HOẶC email. Trả về None nếu sai thông tin."""
     user = db.scalar(
@@ -56,6 +64,12 @@ def authenticate(db: Session, identifier: str, password: str) -> User | None:
     if not verify_password(password, user.hashed_password):
         return None
     return user
+
+
+def list_users(db: Session, *, skip: int, limit: int) -> tuple[list[User], int]:
+    total = db.scalar(select(func.count()).select_from(User))
+    users = db.scalars(select(User).order_by(User.id).offset(skip).limit(limit)).all()
+    return list(users), total
 
 
 def get_profile(db: Session, username: str) -> User | None:

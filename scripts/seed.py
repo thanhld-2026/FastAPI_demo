@@ -87,6 +87,7 @@ def seed() -> None:
             (mobile, "Push notification khi có comment", TaskStatus.TODO, TaskPriority.LOW, "bob", "dave", ["mobile"], 14),
         ]
 
+        tasks: list[Task] = []
         for project, title, status, priority, creator, assignee, tag_names, due_in in task_specs:
             task = Task(
                 project=project,
@@ -100,6 +101,9 @@ def seed() -> None:
             )
             db.add(task)
             db.flush()
+            tasks.append(task)
+
+        users["carol"].bookmarked_tasks.extend([tasks[2], tasks[5]])
 
         db.commit()  # toàn bộ dữ liệu mẫu được lưu trong 1 transaction
 

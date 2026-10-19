@@ -1,4 +1,4 @@
-"""Mục 4: Đăng ký / đăng nhập JWT, bảo vệ endpoint bằng Bearer token."""
+"""Mục 4 & 5: Đăng ký / đăng nhập JWT, bảo vệ endpoint, phân quyền admin."""
 
 from datetime import timedelta
 
@@ -150,3 +150,36 @@ def test_update_me_with_taken_email_returns_409(client, make_user):
     resp = client.put("/api/users/me", json={"email": "alice@example.com"}, headers=bob["headers"])
 
     assert resp.status_code == 409
+
+
+def test_admin_only_endpoints(client, make_user):
+    member = make_user("member")
+    admin = make_user("boss", admin=True)
+
+    assert client.get("/api/users", headers=member["headers"]).status_code == 403
+    resp = client.get("/api/users", headers=admin["headers"])
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 2
+
+
+def test_deactivated_user_is_blocked(client, make_user):
+    admin = make_user("boss", admin=True)
+    bob = make_user("bob")
+
+    resp = client.patch(f"/api/users/{bob['id']}", json={"is_active": False}, headers=admin["headers"])
+
+    assert resp.status_code == 200
+    # Token cũ vẫn còn hạn nhưng get_current_active_user chặn lại
+    assert client.get("/api/users/me", headers=bob["headers"]).status_code == 403
+    login = client.post("/api/users/login", data={"username": "bob", "password": DEFAULT_PASSWORD})
+    assert login.status_code == 403
+
+
+def test_admin_cannot_demote_themselves(client, make_user):
+    admin = make_user("boss", admin=True)
+
+    resp = client.patch(
+        f"/api/users/{admin['id']}", json={"role": "member"}, headers=admin["headers"]
+    )
+
+    assert resp.status_code == 400

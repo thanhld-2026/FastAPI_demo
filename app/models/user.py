@@ -6,6 +6,7 @@ from sqlalchemy import String, Text, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models.associations import task_bookmarks
 from app.models.base import TimestampMixin, enum_column
 from app.models.enums import UserRole
 
@@ -41,3 +42,7 @@ class User(TimestampMixin, Base):
         back_populates="assignee", foreign_keys="Task.assignee_id", order_by="Task.id"
     )
     comments: Mapped[list[Comment]] = relationship(back_populates="author")
+    # Many-to-Many qua bảng trung gian task_bookmarks
+    bookmarked_tasks: Mapped[list[Task]] = relationship(
+        secondary=task_bookmarks, back_populates="bookmarked_by"
+    )

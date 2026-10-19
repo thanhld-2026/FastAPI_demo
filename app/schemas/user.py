@@ -43,6 +43,11 @@ class UserUpdate(InputSchema):
         return self
 
 
+class AdminUserUpdate(InputSchema):
+    role: UserRole | None = None
+    is_active: bool | None = None
+
+
 # ---------- Output ----------
 class UserPublic(ORMSchema):
     """Thông tin công khai, dùng khi lồng (nested) trong project/task/comment."""

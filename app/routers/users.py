@@ -1,13 +1,16 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.exc import IntegrityError
 
 from app import crud
-from app.dependencies import CurrentUser, DbSession
+from app.dependencies import AdminUser, CurrentUser, DbSession, verify_admin_role
+from app.models import UserRole
+from app.schemas.common import Page
 from app.schemas.profile import UserProfile
-from app.schemas.user import Token, UserCreate, UserOut, UserUpdate
+from app.schemas.task import TaskOut
+from app.schemas.user import AdminUserUpdate, Token, UserCreate, UserOut, UserUpdate
 from app.security import create_access_token
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
@@ -44,6 +47,8 @@ def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbSession):
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if not user.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Inactive user")
     return Token(access_token=create_access_token(user.id))
 
 
@@ -58,6 +63,39 @@ def update_me(data: UserUpdate, current_user: CurrentUser, db: DbSession):
     if email_changed and crud.user.get_by_email(db, data.email):
         raise HTTPException(status.HTTP_409_CONFLICT, detail="Email already registered")
     return crud.user.update(db, current_user, data)
+
+
+@router.get("/me/bookmarks", response_model=list[TaskOut], summary="Các task tôi đã bookmark")
+def my_bookmarks(current_user: CurrentUser, db: DbSession):
+    return crud.task.list_bookmarked(db, current_user.id)
+
+
+@router.get(
+    "",
+    response_model=Page[UserOut],
+    # Không cần dùng giá trị trả về của dependency -> khai báo ở `dependencies=[...]`
+    dependencies=[Depends(verify_admin_role)],
+    summary="[Admin] Danh sách user",
+)
+def list_users(
+    db: DbSession,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    items, total = crud.user.list_users(db, skip=skip, limit=limit)
+    return {"items": items, "total": total, "skip": skip, "limit": limit}
+
+
+@router.patch("/{user_id}", response_model=UserOut, summary="[Admin] Đổi role / khóa tài khoản")
+def admin_update_user(user_id: int, data: AdminUserUpdate, admin: AdminUser, db: DbSession):
+    user = crud.user.get_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.id == admin.id and (data.role == UserRole.MEMBER or data.is_active is False):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="Admins cannot demote or deactivate themselves"
+        )
+    return crud.user.admin_update(db, user, data)
 
 
 @router.get("/{username}/profile", response_model=UserProfile, summary="Trang cá nhân công khai")

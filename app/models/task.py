@@ -7,7 +7,7 @@ from sqlalchemy import Date, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-from app.models.associations import task_tags
+from app.models.associations import task_bookmarks, task_tags
 from app.models.base import TimestampMixin, enum_column
 from app.models.enums import TaskPriority, TaskStatus
 
@@ -57,6 +57,9 @@ class Task(TimestampMixin, Base):
     # Many-to-Many
     tags: Mapped[list[Tag]] = relationship(
         secondary=task_tags, back_populates="tasks", order_by="Tag.name"
+    )
+    bookmarked_by: Mapped[list[User]] = relationship(
+        secondary=task_bookmarks, back_populates="bookmarked_tasks"
     )
     # One-to-Many
     comments: Mapped[list[Comment]] = relationship(

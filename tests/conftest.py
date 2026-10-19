@@ -21,12 +21,13 @@ from collections.abc import Callable, Iterator  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import create_engine, event  # noqa: E402
+from sqlalchemy import create_engine, event, update  # noqa: E402
 from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from app.database import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402
+from app.models import User, UserRole  # noqa: E402
 
 # StaticPool: mọi session dùng chung 1 connection -> cùng nhìn thấy 1 DB in-memory
 engine = create_engine(
@@ -76,13 +77,13 @@ def client() -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def make_user(client: TestClient) -> Callable[..., dict]:
+def make_user(client: TestClient, db: Session) -> Callable[..., dict]:
     """Factory: đăng ký + đăng nhập 1 user qua API.
 
     Trả về dict: {"id", "username", "email", "headers"} với headers chứa Bearer token.
     """
 
-    def _make_user(username: str, *, password: str = DEFAULT_PASSWORD) -> dict:
+    def _make_user(username: str, *, admin: bool = False, password: str = DEFAULT_PASSWORD) -> dict:
         resp = client.post(
             "/api/users/register",
             json={"username": username, "email": f"{username}@example.com", "password": password},
@@ -90,12 +91,30 @@ def make_user(client: TestClient) -> Callable[..., dict]:
         assert resp.status_code == 201, resp.text
         user = resp.json()
 
+        if admin:
+            db.execute(update(User).where(User.id == user["id"]).values(role=UserRole.ADMIN))
+            db.commit()
+
         resp = client.post("/api/users/login", data={"username": username, "password": password})
         assert resp.status_code == 200, resp.text
         token = resp.json()["access_token"]
         return {**user, "headers": {"Authorization": f"Bearer {token}"}}
 
     return _make_user
+
+
+@pytest.fixture
+def make_tag(client: TestClient, make_user) -> Callable[[str], dict]:
+    admin = None
+
+    def _make_tag(name: str) -> dict:
+        nonlocal admin
+        admin = admin or make_user("tag_admin", admin=True)
+        resp = client.post("/api/tags", json={"name": name}, headers=admin["headers"])
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+
+    return _make_tag
 
 
 @pytest.fixture

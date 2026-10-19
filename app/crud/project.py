@@ -1,8 +1,8 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models import Project, Task, User
-from app.schemas.project import ProjectCreate
+from app.schemas.project import ProjectCreate, ProjectUpdate
 
 
 def get(db: Session, project_id: int) -> Project | None:
@@ -29,13 +29,16 @@ def get_detail(db: Session, project_id: int) -> Project | None:
     return db.scalar(stmt)
 
 
-def list_projects(db: Session) -> list[Project]:
+def list_projects(db: Session, *, skip: int, limit: int) -> tuple[list[Project], int]:
+    total = db.scalar(select(func.count()).select_from(Project))
     stmt = (
         select(Project)
         .options(joinedload(Project.owner))  # tránh N+1 khi trả về owner của từng project
         .order_by(Project.id)
+        .offset(skip)
+        .limit(limit)
     )
-    return list(db.scalars(stmt).all())
+    return list(db.scalars(stmt).all()), total
 
 
 def create(db: Session, data: ProjectCreate, owner: User) -> Project:
@@ -44,3 +47,16 @@ def create(db: Session, data: ProjectCreate, owner: User) -> Project:
     db.commit()
     db.refresh(project)
     return project
+
+
+def update(db: Session, project: Project, data: ProjectUpdate) -> Project:
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(project, field, value)
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+def delete(db: Session, project: Project) -> None:
+    db.delete(project)  # cascade xóa luôn tasks -> comments, activities
+    db.commit()

@@ -1,9 +1,11 @@
 """Các dependency dùng chung (hệ thống Dependency Injection của FastAPI).
 
-Chuỗi phụ thuộc xác thực:
+Chuỗi phụ thuộc xác thực / phân quyền:
 
-    oauth2_scheme  ->  get_current_user
-    (lấy token)        (decode JWT, load user từ DB)
+    oauth2_scheme  ->  get_current_user  ->  get_current_active_user  ->  verify_admin_role
+    (lấy token)        (decode JWT,          (chặn user bị khóa)          (chỉ admin)
+                        load user từ DB)                              ->  verify_project_manager
+                                                                          (chỉ PM/admin của project)
 
 Endpoint chỉ cần khai báo `current_user: CurrentUser` là FastAPI tự chạy cả chuỗi.
 """
@@ -15,7 +17,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
-from app import crud
+from app import crud, permissions
 from app.database import get_db
 from app.models import Project, Tag, Task, User
 from app.security import decode_access_token
@@ -44,10 +46,27 @@ def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: DbSessio
     return user
 
 
-CurrentUser = Annotated[User, Depends(get_current_user)]
+def get_current_active_user(user: Annotated[User, Depends(get_current_user)]) -> User:
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
+    return user
 
 
-# ---------- Load resource theo path param ----------
+CurrentUser = Annotated[User, Depends(get_current_active_user)]
+
+
+# ---------- Phân quyền (Authorization): "Bạn được làm gì?" ----------
+def verify_admin_role(user: CurrentUser) -> User:
+    if not permissions.is_admin(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required"
+        )
+    return user
+
+
+AdminUser = Annotated[User, Depends(verify_admin_role)]
+
+
 def get_project_or_404(project_id: int, db: DbSession) -> Project:
     project = crud.project.get(db, project_id)
     if project is None:
@@ -55,6 +74,22 @@ def get_project_or_404(project_id: int, db: DbSession) -> Project:
     return project
 
 
+def verify_project_manager(
+    project: Annotated[Project, Depends(get_project_or_404)], user: CurrentUser
+) -> Project:
+    """Chỉ PM (owner) của project hoặc admin mới qua được. Trả về luôn project để endpoint dùng."""
+    if not permissions.can_manage_project(user, project):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the project manager or an admin can perform this action",
+        )
+    return project
+
+
+ManagedProject = Annotated[Project, Depends(verify_project_manager)]
+
+
+# ---------- Load resource theo path param ----------
 def get_task_or_404(task_id: int, db: DbSession) -> Task:
     task = crud.task.get(db, task_id)
     if task is None:

@@ -66,3 +66,8 @@ class TaskOut(ORMSchema):
     tags: list[TagOut]
     created_at: datetime
     updated_at: datetime
+
+
+class BookmarkOut(ORMSchema):
+    task_id: int
+    bookmarked: bool

@@ -1,4 +1,8 @@
+from typing import Generic, TypeVar
+
 from pydantic import BaseModel, ConfigDict
+
+T = TypeVar("T")
 
 
 class InputSchema(BaseModel):
@@ -16,3 +20,12 @@ class ORMSchema(BaseModel):
     """Base cho dữ liệu trả về: from_attributes=True cho phép đọc thẳng từ SQLAlchemy object."""
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class Page(BaseModel, Generic[T]):
+    """Response phân trang dùng chung: Page[TaskOut], Page[ProjectOut], ..."""
+
+    items: list[T]
+    total: int
+    skip: int
+    limit: int
