@@ -18,6 +18,7 @@ cp .env.example .env
 
 docker compose up -d db          # bật PostgreSQL
 alembic upgrade head             # tạo bảng
+python -m scripts.seed           # dữ liệu mẫu
 uvicorn app.main:app --reload    # http://localhost:8000/docs
 ```
 
@@ -33,4 +34,5 @@ app/
 ├── crud/           # Truy cập DB
 └── routers/        # Endpoint HTTP (APIRouter)
 alembic/            # Migration database
+scripts/seed.py     # Dữ liệu mẫu
 ```
