@@ -1,0 +1,24 @@
+# Bật PostgreSQL cho môi trường dev:   docker compose up -d db
+#
+# Các biến ${...} được đọc từ file .env cùng thư mục (giá trị sau :- là mặc định).
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-taskhub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-taskhub}
+      POSTGRES_DB: ${POSTGRES_DB:-taskhub}
+    ports:
+      - "${DB_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data # dữ liệu không mất khi xóa container
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

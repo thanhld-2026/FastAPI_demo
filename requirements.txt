@@ -1,0 +1,12 @@
+# --- Web framework ---
+fastapi==0.146.0
+uvicorn[standard]==0.54.0
+
+# --- Database ---
+sqlalchemy==2.1.5
+alembic==1.20.0
+psycopg[binary]==3.3.6        # driver PostgreSQL (psycopg 3)
+
+# --- Config ---
+pydantic-settings==2.16.0
+python-dotenv==1.2.4          # đọc file .env
