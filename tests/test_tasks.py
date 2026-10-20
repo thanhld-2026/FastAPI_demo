@@ -15,27 +15,27 @@ def test_register_login_and_create_task_flow(client):
     """Đi qua API giống hệt 1 client thật: không chạm trực tiếp vào DB."""
     # 1. Đăng ký
     register = client.post(
-        "/api/users/register",
+        "/api/v1/users/register",
         json={"username": "alice", "email": "alice@example.com", "password": DEFAULT_PASSWORD},
     )
     assert register.status_code == 201
 
     # 2. Đăng nhập -> nhận access token
     login = client.post(
-        "/api/users/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
+        "/api/v1/users/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
     )
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
     # 3. Tạo project
-    project = client.post("/api/projects", json={"name": "TaskHub"}, headers=headers)
+    project = client.post("/api/v1/projects", json={"name": "TaskHub"}, headers=headers)
     assert project.status_code == 201
     project_id = project.json()["id"]
 
     # 4. Tạo task trong project
     due_date = (date.today() + timedelta(days=7)).isoformat()
     created = client.post(
-        f"/api/projects/{project_id}/tasks",
+        f"/api/v1/projects/{project_id}/tasks",
         json={"title": "Viết API đăng ký", "priority": "HIGH", "due_date": due_date},
         headers=headers,
     )
@@ -49,7 +49,7 @@ def test_register_login_and_create_task_flow(client):
     assert task["assignee"] is None
 
     # 5. Đọc lại: task xuất hiện trong danh sách task của project
-    listed = client.get(f"/api/projects/{project_id}/tasks")
+    listed = client.get(f"/api/v1/projects/{project_id}/tasks")
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
     assert listed.json()["items"][0]["id"] == task["id"]
@@ -58,7 +58,7 @@ def test_register_login_and_create_task_flow(client):
 def test_create_task_requires_login(client, make_user, make_project):
     project = make_project(make_user("pmuser"))
 
-    resp = client.post(f"/api/projects/{project['id']}/tasks", json={"title": "X"})
+    resp = client.post(f"/api/v1/projects/{project['id']}/tasks", json={"title": "X"})
 
     assert resp.status_code == 401
 
@@ -69,7 +69,7 @@ def test_create_task_with_tags(client, make_user, make_project, make_tag):
     backend, bug = make_tag("backend"), make_tag("bug")
 
     resp = client.post(
-        f"/api/projects/{project['id']}/tasks",
+        f"/api/v1/projects/{project['id']}/tasks",
         json={"title": "Fix login", "tag_ids": [bug["id"], backend["id"], bug["id"]]},
         headers=pm["headers"],
     )
@@ -83,7 +83,7 @@ def test_create_task_with_unknown_tag_returns_400(client, make_user, make_projec
     project = make_project(pm)
 
     resp = client.post(
-        f"/api/projects/{project['id']}/tasks",
+        f"/api/v1/projects/{project['id']}/tasks",
         json={"title": "X", "tag_ids": [999]},
         headers=pm["headers"],
     )
@@ -98,7 +98,7 @@ def test_filter_tasks_by_status_and_priority(client, make_user, make_project, ma
     make_task(project["id"], pm, title="B", status="TODO", priority="LOW")
     make_task(project["id"], pm, title="C", status="DONE", priority="HIGH")
 
-    resp = client.get("/api/tasks", params={"status": "TODO", "priority": "HIGH"})
+    resp = client.get("/api/v1/tasks", params={"status": "TODO", "priority": "HIGH"})
 
     assert resp.status_code == 200
     assert resp.json()["total"] == 1
@@ -106,7 +106,7 @@ def test_filter_tasks_by_status_and_priority(client, make_user, make_project, ma
 
 
 def test_filter_with_invalid_enum_returns_422(client):
-    assert client.get("/api/tasks", params={"status": "UNKNOWN"}).status_code == 422
+    assert client.get("/api/v1/tasks", params={"status": "UNKNOWN"}).status_code == 422
 
 
 def test_search_tasks_by_title(client, make_user, make_project, make_task):
@@ -115,7 +115,7 @@ def test_search_tasks_by_title(client, make_user, make_project, make_task):
     make_task(project["id"], pm, title="Implement login API")
     make_task(project["id"], pm, title="Design homepage")
 
-    resp = client.get("/api/tasks", params={"q": "LOGIN"})
+    resp = client.get("/api/v1/tasks", params={"q": "LOGIN"})
 
     assert [t["title"] for t in resp.json()["items"]] == ["Implement login API"]
 
@@ -126,31 +126,31 @@ def test_paginate_project_tasks(client, make_user, make_project, make_task):
     for i in range(15):
         make_task(project["id"], pm, title=f"Task {i:02d}")
 
-    resp = client.get(f"/api/projects/{project['id']}/tasks", params={"skip": 10, "limit": 5})
+    resp = client.get(f"/api/v1/projects/{project['id']}/tasks", params={"page": 3, "limit": 5})
 
     body = resp.json()
     assert resp.status_code == 200
     assert body["total"] == 15
-    assert (body["skip"], body["limit"]) == (10, 5)
-    # Sắp xếp mới nhất trước: trang 3 (skip=10) chứa 5 task được tạo sớm nhất
+    assert (body["page"], body["limit"], body["pages"]) == (3, 5, 3)
+    # Sắp xếp mới nhất trước: trang 3 (bỏ qua 10 task) chứa 5 task được tạo sớm nhất
     assert [t["title"] for t in body["items"]] == [f"Task {i:02d}" for i in range(4, -1, -1)]
 
 
 def test_pagination_params_are_validated(client):
-    assert client.get("/api/tasks", params={"limit": 101}).status_code == 422
-    assert client.get("/api/tasks", params={"skip": -1}).status_code == 422
+    assert client.get("/api/v1/tasks", params={"limit": 101}).status_code == 422
+    assert client.get("/api/v1/tasks", params={"page": 0}).status_code == 422
 
 
 def test_filter_ids_must_be_positive(client):
-    assert client.get("/api/tasks", params={"project_id": 0}).status_code == 422
-    assert client.get("/api/tasks", params={"assignee_id": -1}).status_code == 422
+    assert client.get("/api/v1/tasks", params={"project_id": 0}).status_code == 422
+    assert client.get("/api/v1/tasks", params={"assignee_id": -1}).status_code == 422
 
 
 def test_bookmark_requires_login(client, make_user, make_project, make_task):
     pm = make_user("pmuser")
     task = make_task(make_project(pm)["id"], pm)
 
-    resp = client.post(f"/api/tasks/{task['id']}/bookmark")
+    resp = client.post(f"/api/v1/tasks/{task['id']}/bookmark")
 
     assert resp.status_code == 401
 
@@ -159,13 +159,13 @@ def test_bookmark_and_unbookmark(client, make_user, make_project, make_task):
     pm = make_user("pmuser")
     reader = make_user("reader")
     task = make_task(make_project(pm)["id"], pm, title="Interesting task")
-    url = f"/api/tasks/{task['id']}/bookmark"
+    url = f"/api/v1/tasks/{task['id']}/bookmark"
 
     first = client.post(url, headers=reader["headers"])
     again = client.post(url, headers=reader["headers"])  # idempotent, không lỗi
-    bookmarks = client.get("/api/users/me/bookmarks", headers=reader["headers"]).json()
+    bookmarks = client.get("/api/v1/users/me/bookmarks", headers=reader["headers"]).json()
     removed = client.delete(url, headers=reader["headers"])
-    after = client.get("/api/users/me/bookmarks", headers=reader["headers"]).json()
+    after = client.get("/api/v1/users/me/bookmarks", headers=reader["headers"]).json()
 
     assert first.json() == {"task_id": task["id"], "bookmarked": True}
     assert again.status_code == 200
@@ -173,7 +173,7 @@ def test_bookmark_and_unbookmark(client, make_user, make_project, make_task):
     assert [t["title"] for t in bookmarks["items"]] == ["Interesting task"]
     assert removed.json()["bookmarked"] is False
     assert (after["total"], after["items"]) == (0, [])
-    assert client.post("/api/tasks/999/bookmark", headers=reader["headers"]).status_code == 404
+    assert client.post("/api/v1/tasks/999/bookmark", headers=reader["headers"]).status_code == 404
 
 
 def test_task_edit_and_delete_permissions(client, make_user, make_project, make_task):
@@ -181,7 +181,7 @@ def test_task_edit_and_delete_permissions(client, make_user, make_project, make_
     creator = make_user("creator")
     stranger = make_user("stranger")
     task = make_task(make_project(pm)["id"], creator)
-    url = f"/api/tasks/{task['id']}"
+    url = f"/api/v1/tasks/{task['id']}"
 
     assert client.put(url, json={"status": "DONE"}, headers=stranger["headers"]).status_code == 403
     updated = client.put(url, json={"status": "IN_PROGRESS"}, headers=creator["headers"])
@@ -196,7 +196,7 @@ def test_update_task_rejects_null_for_required_fields(client, make_user, make_pr
     pm = make_user("pmuser")
     task = make_task(make_project(pm)["id"], pm)
 
-    resp = client.put(f"/api/tasks/{task['id']}", json={"title": None}, headers=pm["headers"])
+    resp = client.put(f"/api/v1/tasks/{task['id']}", json={"title": None}, headers=pm["headers"])
 
     assert resp.status_code == 422
 
@@ -205,7 +205,7 @@ def test_unbookmark_is_idempotent(client, make_user, make_project, make_task):
     pm = make_user("pmuser")
     task = make_task(make_project(pm)["id"], pm)
 
-    resp = client.delete(f"/api/tasks/{task['id']}/bookmark", headers=pm["headers"])
+    resp = client.delete(f"/api/v1/tasks/{task['id']}/bookmark", headers=pm["headers"])
 
     # Task chưa từng được bookmark: vẫn 200, trạng thái cuối cùng là "không bookmark"
     assert resp.status_code == 200
@@ -219,12 +219,12 @@ def test_due_date_cannot_be_in_the_past(client, make_user, make_project, make_ta
     yesterday = (date.today() - timedelta(days=1)).isoformat()
 
     created = client.post(
-        f"/api/projects/{project['id']}/tasks",
+        f"/api/v1/projects/{project['id']}/tasks",
         json={"title": "X", "due_date": yesterday},
         headers=pm["headers"],
     )
     updated = client.put(
-        f"/api/tasks/{task['id']}", json={"due_date": yesterday}, headers=pm["headers"]
+        f"/api/v1/tasks/{task['id']}", json={"due_date": yesterday}, headers=pm["headers"]
     )
 
     assert created.status_code == 422
@@ -239,7 +239,7 @@ def test_overdue_task_can_still_be_updated(client, db, make_user, make_project, 
     db.execute(update(Task).where(Task.id == task["id"]).values(due_date=overdue))
     db.commit()
 
-    resp = client.put(f"/api/tasks/{task['id']}", json={"status": "DONE"}, headers=pm["headers"])
+    resp = client.put(f"/api/v1/tasks/{task['id']}", json={"status": "DONE"}, headers=pm["headers"])
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "DONE"
@@ -248,7 +248,7 @@ def test_overdue_task_can_still_be_updated(client, db, make_user, make_project, 
 
 def test_error_responses_are_documented(client):
     spec = client.get("/openapi.json").json()
-    responses = spec["paths"]["/api/tasks/{task_id}"]["put"]["responses"]
+    responses = spec["paths"]["/api/v1/tasks/{task_id}"]["put"]["responses"]
 
     assert {"400", "401", "403", "404", "422"} <= responses.keys()
     schema = responses["404"]["content"]["application/json"]["schema"]
@@ -262,10 +262,12 @@ def test_title_must_be_single_line(client, make_user, make_project, make_task):
     task = make_task(project["id"], pm)
 
     created = client.post(
-        f"/api/projects/{project['id']}/tasks", json={"title": "Fix\nlogin"}, headers=pm["headers"]
+        f"/api/v1/projects/{project['id']}/tasks",
+        json={"title": "Fix\nlogin"},
+        headers=pm["headers"],
     )
     updated = client.put(
-        f"/api/tasks/{task['id']}", json={"title": "Fix\r\nlogin"}, headers=pm["headers"]
+        f"/api/v1/tasks/{task['id']}", json={"title": "Fix\r\nlogin"}, headers=pm["headers"]
     )
 
     assert created.status_code == 422
@@ -280,7 +282,7 @@ def _seed_tasks(client, make_user, make_project, make_task, make_tag, count: int
     for i in range(count):
         task = make_task(project["id"], pm, title=f"T{i}", tag_ids=[tag["id"]])
         client.post(
-            f"/api/tasks/{task['id']}/assign",
+            f"/api/v1/tasks/{task['id']}/assign",
             json={"assignee_id": dev["id"]},
             headers=pm["headers"],
         )
@@ -292,12 +294,12 @@ def test_listing_tasks_runs_constant_number_of_queries(
     """Số query KHÔNG tăng theo số task nhờ joinedload / selectinload."""
     _seed_tasks(client, make_user, make_project, make_task, make_tag, count=2)
     sql_log.clear()
-    client.get("/api/tasks")
+    client.get("/api/v1/tasks")
     queries_for_2_tasks = len(sql_log)
 
     _seed_tasks(client, make_user, make_project, make_task, make_tag, count=10)
     sql_log.clear()
-    resp = client.get("/api/tasks")
+    resp = client.get("/api/v1/tasks")
     queries_for_12_tasks = len(sql_log)
 
     assert resp.json()["total"] == 12

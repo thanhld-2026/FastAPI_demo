@@ -18,7 +18,7 @@ def list_for_task(
         .where(Comment.task_id == task_id)
         .options(joinedload(Comment.author))
         .order_by(Comment.id)
-        .offset(pagination.skip)
+        .offset(pagination.offset)
         .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total

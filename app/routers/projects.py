@@ -19,7 +19,7 @@ from app.schemas.common import Page
 from app.schemas.project import ProjectCreate, ProjectDetail, ProjectOut, ProjectUpdate
 from app.schemas.task import TaskCreate, TaskOut
 
-router = APIRouter(prefix="/api/projects", tags=["Projects"])
+router = APIRouter(prefix="/projects", tags=["Projects"])
 
 
 @router.get("", response_model=Page[ProjectOut], summary="Danh sách project")

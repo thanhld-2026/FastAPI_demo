@@ -36,7 +36,7 @@ def list_projects(db: Session, pagination: PageParams) -> tuple[list[Project], i
         select(Project)
         .options(joinedload(Project.owner))  # tránh N+1 khi trả về owner của từng project
         .order_by(Project.id)
-        .offset(pagination.skip)
+        .offset(pagination.offset)
         .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total

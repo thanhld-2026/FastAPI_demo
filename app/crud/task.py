@@ -88,7 +88,7 @@ def list_tasks(
         .where(*conditions)
         .options(*TASK_LOAD_OPTIONS)
         .order_by(Task.id.desc())
-        .offset(pagination.skip)
+        .offset(pagination.offset)
         .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total
@@ -197,7 +197,7 @@ def list_bookmarked(
         .where(task_bookmarks.c.user_id == user_id)
         .options(*TASK_LOAD_OPTIONS)
         .order_by(task_bookmarks.c.created_at.desc(), Task.id.desc())
-        .offset(pagination.skip)
+        .offset(pagination.offset)
         .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total

@@ -22,7 +22,7 @@ from app.schemas.task import TaskOut
 from app.schemas.user import AdminUserUpdate, Token, UserCreate, UserOut, UserUpdate
 from app.security import create_access_token
 
-router = APIRouter(prefix="/api/users", tags=["Users"])
+router = APIRouter(prefix="/users", tags=["Users"])
 
 
 @router.post(

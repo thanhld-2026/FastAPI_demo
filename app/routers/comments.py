@@ -14,7 +14,7 @@ from app.schemas.comment import CommentCreate, CommentOut, CommentUpdate
 from app.schemas.common import Page
 from app.services import comments as comment_service
 
-router = APIRouter(prefix="/api/tasks/{task_id}/comments", tags=["Comments"])
+router = APIRouter(prefix="/tasks/{task_id}/comments", tags=["Comments"])
 
 
 @router.get(

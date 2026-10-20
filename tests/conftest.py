@@ -89,7 +89,7 @@ def make_user(client: TestClient, db: Session) -> Callable[..., dict]:
 
     def _make_user(username: str, *, admin: bool = False, password: str = DEFAULT_PASSWORD) -> dict:
         resp = client.post(
-            "/api/users/register",
+            "/api/v1/users/register",
             json={"username": username, "email": f"{username}@example.com", "password": password},
         )
         assert resp.status_code == 201, resp.text
@@ -99,7 +99,7 @@ def make_user(client: TestClient, db: Session) -> Callable[..., dict]:
             db.execute(update(User).where(User.id == user["id"]).values(role=UserRole.ADMIN))
             db.commit()
 
-        resp = client.post("/api/users/login", data={"username": username, "password": password})
+        resp = client.post("/api/v1/users/login", data={"username": username, "password": password})
         assert resp.status_code == 200, resp.text
         token = resp.json()["access_token"]
         return {**user, "headers": {"Authorization": f"Bearer {token}"}}
@@ -114,7 +114,7 @@ def make_tag(client: TestClient, make_user) -> Callable[[str], dict]:
     def _make_tag(name: str) -> dict:
         nonlocal admin
         admin = admin or make_user("tag_admin", admin=True)
-        resp = client.post("/api/tags", json={"name": name}, headers=admin["headers"])
+        resp = client.post("/api/v1/tags", json={"name": name}, headers=admin["headers"])
         assert resp.status_code == 201, resp.text
         return resp.json()
 
@@ -124,7 +124,7 @@ def make_tag(client: TestClient, make_user) -> Callable[[str], dict]:
 @pytest.fixture
 def make_project(client: TestClient) -> Callable[..., dict]:
     def _make_project(owner: dict, name: str = "TaskHub") -> dict:
-        resp = client.post("/api/projects", json={"name": name}, headers=owner["headers"])
+        resp = client.post("/api/v1/projects", json={"name": name}, headers=owner["headers"])
         assert resp.status_code == 201, resp.text
         return resp.json()
 
@@ -136,7 +136,7 @@ def make_task(client: TestClient) -> Callable[..., dict]:
     def _make_task(project_id: int, creator: dict, **fields) -> dict:
         payload = {"title": "A task", **fields}
         resp = client.post(
-            f"/api/projects/{project_id}/tasks", json=payload, headers=creator["headers"]
+            f"/api/v1/projects/{project_id}/tasks", json=payload, headers=creator["headers"]
         )
         assert resp.status_code == 201, resp.text
         return resp.json()

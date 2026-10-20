@@ -4,6 +4,10 @@ Khai báo 1 chỗ để không bị lệch: sửa String(...) ở model mà quê
 thì input hợp lệ vẫn có thể bị DB từ chối.
 """
 
+# --- API ---
+# Đổi API theo kiểu không tương thích ngược thì thêm /api/v2, client cũ vẫn dùng được v1
+API_V1_PREFIX = "/api/v1"
+
 # --- User ---
 USERNAME_MIN_LENGTH = 3
 USERNAME_MAX_LENGTH = 50

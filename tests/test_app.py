@@ -29,7 +29,7 @@ def test_invalid_request_id_from_client_is_replaced(client):
 
 def test_cors_allows_configured_frontend_origin(client):
     resp = client.options(
-        "/api/projects",
+        "/api/v1/projects",
         headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET"},
     )
 
@@ -39,7 +39,7 @@ def test_cors_allows_configured_frontend_origin(client):
 
 def test_cors_rejects_unknown_origin(client):
     resp = client.options(
-        "/api/projects",
+        "/api/v1/projects",
         headers={"Origin": "http://evil.example.com", "Access-Control-Request-Method": "GET"},
     )
 
@@ -53,7 +53,7 @@ def test_unhandled_error_returns_generic_500(client, monkeypatch):
     monkeypatch.setattr(crud.tag, "list_tags", broken_list_tags)
 
     resp = client.get(
-        "/api/tags", headers={"X-Request-ID": "req-500", "Origin": "http://localhost:3000"}
+        "/api/v1/tags", headers={"X-Request-ID": "req-500", "Origin": "http://localhost:3000"}
     )
 
     assert resp.status_code == 500

@@ -2,7 +2,7 @@
 
 
 def test_create_project_requires_login(client):
-    resp = client.post("/api/projects", json={"name": "TaskHub"})
+    resp = client.post("/api/v1/projects", json={"name": "TaskHub"})
     assert resp.status_code == 401
 
 
@@ -10,12 +10,12 @@ def test_create_and_get_project(client, make_user):
     pm = make_user("pmuser")
 
     created = client.post(
-        "/api/projects",
+        "/api/v1/projects",
         json={"name": "TaskHub", "description": "Backend API"},
         headers=pm["headers"],
     )
     project_id = created.json()["id"]
-    detail = client.get(f"/api/projects/{project_id}")
+    detail = client.get(f"/api/v1/projects/{project_id}")
 
     assert created.status_code == 201
     assert created.json()["owner"]["username"] == "pmuser"  # người tạo = PM
@@ -25,8 +25,8 @@ def test_create_and_get_project(client, make_user):
 
 
 def test_get_unknown_project_returns_404(client):
-    assert client.get("/api/projects/999").status_code == 404
-    assert client.get("/api/projects/999/tasks").status_code == 404
+    assert client.get("/api/v1/projects/999").status_code == 404
+    assert client.get("/api/v1/projects/999/tasks").status_code == 404
 
 
 def test_list_projects_is_paginated(client, make_user, make_project):
@@ -34,7 +34,7 @@ def test_list_projects_is_paginated(client, make_user, make_project):
     for i in range(3):
         make_project(pm, name=f"Project {i}")
 
-    resp = client.get("/api/projects", params={"skip": 1, "limit": 1})
+    resp = client.get("/api/v1/projects", params={"page": 2, "limit": 1})
 
     body = resp.json()
     assert resp.status_code == 200
@@ -51,10 +51,10 @@ def test_project_detail_contains_nested_tasks_with_assignee(
     project = make_project(pm)
     task = make_task(project["id"], pm, title="Design DB")
     client.post(
-        f"/api/tasks/{task['id']}/assign", json={"assignee_id": dev["id"]}, headers=pm["headers"]
+        f"/api/v1/tasks/{task['id']}/assign", json={"assignee_id": dev["id"]}, headers=pm["headers"]
     )
 
-    detail = client.get(f"/api/projects/{project['id']}").json()
+    detail = client.get(f"/api/v1/projects/{project['id']}").json()
 
     assert detail["owner"]["username"] == "pmuser"
     assert detail["tasks"][0]["title"] == "Design DB"
@@ -66,7 +66,7 @@ def test_only_project_manager_or_admin_can_update_project(client, make_user, mak
     other = make_user("other")
     admin = make_user("boss", admin=True)
     project = make_project(pm)
-    url = f"/api/projects/{project['id']}"
+    url = f"/api/v1/projects/{project['id']}"
 
     by_other = client.put(url, json={"name": "Hacked"}, headers=other["headers"])
     by_pm = client.put(url, json={"name": "Renamed by PM"}, headers=pm["headers"])
@@ -84,11 +84,11 @@ def test_delete_project_cascades_to_tasks(client, make_user, make_project, make_
     project = make_project(pm)
     task = make_task(project["id"], pm)
 
-    resp = client.delete(f"/api/projects/{project['id']}", headers=pm["headers"])
+    resp = client.delete(f"/api/v1/projects/{project['id']}", headers=pm["headers"])
 
     assert resp.status_code == 204
-    assert client.get(f"/api/projects/{project['id']}").status_code == 404
-    assert client.get(f"/api/tasks/{task['id']}").status_code == 404
+    assert client.get(f"/api/v1/projects/{project['id']}").status_code == 404
+    assert client.get(f"/api/v1/tasks/{task['id']}").status_code == 404
 
 
 def test_user_profile_contains_projects_and_assigned_tasks(
@@ -99,13 +99,13 @@ def test_user_profile_contains_projects_and_assigned_tasks(
     project = make_project(pm, name="Mobile App")
     task = make_task(project["id"], pm, title="Login screen")
     client.post(
-        f"/api/tasks/{task['id']}/assign", json={"assignee_id": dev["id"]}, headers=pm["headers"]
+        f"/api/v1/tasks/{task['id']}/assign", json={"assignee_id": dev["id"]}, headers=pm["headers"]
     )
 
-    pm_profile = client.get("/api/users/pmuser/profile").json()
-    dev_profile = client.get("/api/users/dev/profile").json()
+    pm_profile = client.get("/api/v1/users/pmuser/profile").json()
+    dev_profile = client.get("/api/v1/users/dev/profile").json()
 
     assert [p["name"] for p in pm_profile["owned_projects"]] == ["Mobile App"]
     assert [t["title"] for t in dev_profile["assigned_tasks"]] == ["Login screen"]
     assert "email" not in dev_profile  # profile công khai không lộ email
-    assert client.get("/api/users/ghost/profile").status_code == 404
+    assert client.get("/api/v1/users/ghost/profile").status_code == 404

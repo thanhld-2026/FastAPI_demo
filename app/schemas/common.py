@@ -1,3 +1,4 @@
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Self
@@ -28,8 +29,13 @@ class ORMSchema(BaseModel):
 class PageParams:
     """Tham số phân trang đã validate (do dependency `Pagination` tạo ra)."""
 
-    skip: int
+    page: int  # bắt đầu từ 1
     limit: int
+
+    @property
+    def offset(self) -> int:
+        """Số bản ghi bỏ qua ở tầng DB: trang 3, limit 5 -> bỏ qua 10 bản ghi đầu."""
+        return (self.page - 1) * self.limit
 
 
 class Page[T](BaseModel):
@@ -37,13 +43,20 @@ class Page[T](BaseModel):
 
     items: list[T]
     total: int
-    skip: int
+    page: int
     limit: int
+    pages: int  # tổng số trang, để FE hiển thị thanh phân trang
 
     @classmethod
     def build(cls, items: Sequence[Any], total: int, params: PageParams) -> Self:
         # items có thể là SQLAlchemy object, response_model (vd Page[TaskOut]) lọc field khi trả về
-        return cls(items=list(items), total=total, skip=params.skip, limit=params.limit)
+        return cls(
+            items=list(items),
+            total=total,
+            page=params.page,
+            limit=params.limit,
+            pages=math.ceil(total / params.limit),
+        )
 
 
 def reject_null_fields(schema: BaseModel, *fields: str) -> None:

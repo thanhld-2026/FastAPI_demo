@@ -29,7 +29,7 @@ def list_for_task(
         .where(TaskActivity.task_id == task_id)
         .options(joinedload(TaskActivity.actor))
         .order_by(TaskActivity.id)
-        .offset(pagination.skip)
+        .offset(pagination.offset)
         .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total

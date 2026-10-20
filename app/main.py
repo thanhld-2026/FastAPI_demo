@@ -17,7 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
 from app.core import messages
-from app.core.constants import REQUEST_ID_PATTERN
+from app.core.constants import API_V1_PREFIX, REQUEST_ID_PATTERN
 from app.core.exceptions import AppException, app_exception_handler
 from app.dependencies import DbSession
 from app.logging_config import setup_logging
@@ -108,11 +108,9 @@ app.add_exception_handler(AppException, app_exception_handler)
 
 
 # ---------- Routers ----------
-app.include_router(users.router)
-app.include_router(projects.router)
-app.include_router(tasks.router)
-app.include_router(comments.router)
-app.include_router(tags.router)
+# Mọi API nghiệp vụ nằm dưới /api/v1 (router chỉ khai báo phần đường dẫn phía sau)
+for router in (users.router, projects.router, tasks.router, comments.router, tags.router):
+    app.include_router(router, prefix=API_V1_PREFIX)
 
 
 @app.get("/", include_in_schema=False)

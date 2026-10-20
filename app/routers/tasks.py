@@ -22,7 +22,7 @@ from app.schemas.common import Page
 from app.schemas.task import ActivityOut, BookmarkOut, TaskAssign, TaskOut, TaskUpdate
 from app.services import tasks as task_service
 
-router = APIRouter(prefix="/api/tasks", tags=["Tasks"])
+router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
 
 @router.get("", response_model=Page[TaskOut], summary="Tìm kiếm / lọc / phân trang task")

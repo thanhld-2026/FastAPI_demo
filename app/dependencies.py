@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app import crud, permissions
 from app.core import messages
-from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from app.core.constants import API_V1_PREFIX, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.core.exceptions import (
     BadRequestException,
     ForbiddenException,
@@ -34,7 +34,7 @@ from app.schemas.common import PageParams
 from app.security import decode_access_token
 
 # tokenUrl: endpoint đăng nhập -> Swagger UI dùng để hiện nút "Authorize"
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/users/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{API_V1_PREFIX}/users/login")
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -175,12 +175,12 @@ ModifiableComment = Annotated[Comment, Depends(verify_comment_modifier)]
 
 # ---------- Phân trang ----------
 def get_pagination(
-    skip: Annotated[int, Query(ge=0, description="Số bản ghi bỏ qua")] = 0,
+    page: Annotated[int, Query(ge=1, description="Số trang, bắt đầu từ 1")] = 1,
     limit: Annotated[
         int, Query(ge=1, le=MAX_PAGE_SIZE, description="Số bản ghi tối đa của 1 trang")
     ] = DEFAULT_PAGE_SIZE,
 ) -> PageParams:
-    return PageParams(skip=skip, limit=limit)
+    return PageParams(page=page, limit=limit)
 
 
 Pagination = Annotated[PageParams, Depends(get_pagination)]
