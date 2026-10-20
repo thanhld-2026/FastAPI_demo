@@ -1,5 +1,8 @@
 """Message lỗi trả về cho client, gom 1 chỗ để không gõ lệch giữa các router."""
 
+# --- Chung ---
+INTERNAL_SERVER_ERROR = "Internal server error"
+
 # --- Auth ---
 INVALID_CREDENTIALS = "Could not validate credentials"
 INCORRECT_LOGIN = "Incorrect username or password"

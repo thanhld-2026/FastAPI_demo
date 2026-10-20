@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     # --- App ---
     APP_NAME: str = "TaskHub API"
     ENVIRONMENT: str = "development"
+    LOG_LEVEL: str = "INFO"
+    LOG_FILE: str | None = "logs/app.log"
 
     # --- Database ---
     DATABASE_URL: str = "postgresql+psycopg://taskhub:taskhub@localhost:5432/taskhub"
@@ -26,6 +28,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     BCRYPT_ROUNDS: int = Field(default=12, ge=4, le=16)
+
+    # --- CORS ---
+    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
     # --- Redis cache ---
     REDIS_URL: str | None = None  # None / rỗng -> tắt cache

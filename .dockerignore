@@ -1,0 +1,15 @@
+# Không đưa vào image: môi trường ảo, cache, log, file bí mật
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+logs/
+.env
+.git/
+.gitignore
+.DS_Store
+.idea/
+.vscode/
+docs/
+tests/

@@ -16,6 +16,8 @@ os.environ.update(
         "REDIS_URL": "",
         "EMAIL_ENABLED": "false",
         "BCRYPT_ROUNDS": "4",  # hash nhanh hơn cho test (production dùng 12)
+        "LOG_FILE": "",
+        "LOG_LEVEL": "WARNING",
     }
 )
 
