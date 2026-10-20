@@ -1,7 +1,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.models import Project, Task, User
+from app.models import Project, ProjectStatus, Task, User
 from app.schemas.common import PageParams
 from app.schemas.project import ProjectCreate, ProjectUpdate
 
@@ -30,10 +30,14 @@ def get_detail(db: Session, project_id: int) -> Project | None:
     return db.scalar(stmt)
 
 
-def list_projects(db: Session, pagination: PageParams) -> tuple[list[Project], int]:
-    total = db.execute(select(func.count()).select_from(Project)).scalar_one()
+def list_projects(
+    db: Session, pagination: PageParams, status: ProjectStatus | None = None
+) -> tuple[list[Project], int]:
+    conditions = [Project.status == status] if status is not None else []
+    total = db.execute(select(func.count()).select_from(Project).where(*conditions)).scalar_one()
     stmt = (
         select(Project)
+        .where(*conditions)
         .options(joinedload(Project.owner))  # tránh N+1 khi trả về owner của từng project
         .order_by(Project.id)
         .offset(pagination.offset)
@@ -61,3 +65,10 @@ def update(db: Session, project: Project, data: ProjectUpdate) -> Project:
 def delete(db: Session, project: Project) -> None:
     db.delete(project)  # cascade xóa luôn tasks -> comments, activities
     db.commit()
+
+
+def set_status(db: Session, project: Project, status: ProjectStatus) -> Project:
+    project.status = status
+    db.commit()
+    db.refresh(project)
+    return project

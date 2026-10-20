@@ -12,9 +12,10 @@ from app.dependencies import (
     ManagedProject,
     Pagination,
     ProjectDep,
+    ensure_project_active,
     get_tags_by_ids,
 )
-from app.models import TaskPriority, TaskStatus
+from app.models import ProjectStatus, TaskPriority, TaskStatus
 from app.schemas.common import Page
 from app.schemas.project import ProjectCreate, ProjectDetail, ProjectOut, ProjectUpdate
 from app.schemas.task import TaskCreate, TaskOut
@@ -23,8 +24,12 @@ router = APIRouter(prefix="/projects", tags=["Projects"])
 
 
 @router.get("", response_model=Page[ProjectOut], summary="Danh sách project")
-def list_projects(db: DbSession, pagination: Pagination):
-    items, total = crud.project.list_projects(db, pagination)
+def list_projects(
+    db: DbSession,
+    pagination: Pagination,
+    project_status: Annotated[ProjectStatus | None, Query(alias="status")] = None,
+):
+    items, total = crud.project.list_projects(db, pagination, status=project_status)
     return Page.build(items, total, pagination)
 
 
@@ -72,6 +77,27 @@ def delete_project(project: ManagedProject, db: DbSession):
     crud.project.delete(db, project)
 
 
+@router.post(
+    "/{project_id}/archive",
+    response_model=ProjectOut,
+    summary="[PM/Admin] Archive project (task / comment chỉ còn đọc được)",
+    responses=error_responses(401, 403, 404),
+)
+def archive_project(project: ManagedProject, db: DbSession):
+    """Idempotent: archive 1 project đã archive vẫn trả 200."""
+    return crud.project.set_status(db, project, ProjectStatus.ARCHIVED)
+
+
+@router.post(
+    "/{project_id}/unarchive",
+    response_model=ProjectOut,
+    summary="[PM/Admin] Mở lại project đã archive",
+    responses=error_responses(401, 403, 404),
+)
+def unarchive_project(project: ManagedProject, db: DbSession):
+    return crud.project.set_status(db, project, ProjectStatus.ACTIVE)
+
+
 @router.get(
     "/{project_id}/tasks",
     response_model=Page[TaskOut],
@@ -101,10 +127,11 @@ def list_project_tasks(
     response_model=TaskOut,
     status_code=status.HTTP_201_CREATED,
     summary="Tạo task trong project",
-    responses=error_responses(400, 401, 403, 404),
+    responses=error_responses(400, 401, 403, 404, 409),
 )
 def create_project_task(
     data: TaskCreate, project: ProjectDep, current_user: CurrentUser, db: DbSession
 ):
+    ensure_project_active(project)
     tags = get_tags_by_ids(db, data.tag_ids)
     return crud.task.create(db, project=project, data=data, tags=tags, creator=current_user)

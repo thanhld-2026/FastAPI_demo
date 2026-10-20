@@ -20,7 +20,7 @@ _DESCRIPTIONS = {
     401: "Chưa đăng nhập hoặc token không hợp lệ / hết hạn",
     403: "Không đủ quyền (hoặc tài khoản đã bị khóa)",
     404: "Không tìm thấy resource trên URL",
-    409: "Trùng dữ liệu",
+    409: "Trùng dữ liệu hoặc xung đột trạng thái (vd project đã archive)",
 }
 
 

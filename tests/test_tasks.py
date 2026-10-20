@@ -273,6 +273,17 @@ def test_title_must_be_single_line(client, make_user, make_project, make_task):
     assert created.status_code == 422
     assert updated.status_code == 422
 
+
+def test_in_review_status_and_urgent_priority(client, make_user, make_project, make_task):
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    make_task(project["id"], pm, title="Review PR", status="IN_REVIEW", priority="URGENT")
+    make_task(project["id"], pm, title="Other task")
+
+    resp = client.get("/api/v1/tasks", params={"status": "IN_REVIEW", "priority": "URGENT"})
+
+    assert [t["title"] for t in resp.json()["items"]] == ["Review PR"]
+
 # ---------- N+1 query ----------
 def _seed_tasks(client, make_user, make_project, make_task, make_tag, count: int) -> None:
     pm = make_user(f"pm_{count}")

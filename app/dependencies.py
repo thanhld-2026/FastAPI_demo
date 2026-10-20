@@ -24,12 +24,13 @@ from app.core import messages
 from app.core.constants import API_V1_PREFIX, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.core.exceptions import (
     BadRequestException,
+    ConflictException,
     ForbiddenException,
     NotFoundException,
     UnauthorizedException,
 )
 from app.database import get_db
-from app.models import Comment, Project, Tag, Task, User
+from app.models import Comment, Project, ProjectStatus, Tag, Task, User
 from app.schemas.common import PageParams
 from app.security import decode_access_token
 
@@ -127,6 +128,7 @@ def verify_task_editor(task: TaskDep, user: CurrentUser) -> Task:
     """Người tạo / người được assign / PM / admin mới được sửa task."""
     if not permissions.can_edit_task(user, task):
         raise ForbiddenException(messages.TASK_EDIT_FORBIDDEN)
+    ensure_project_active(task.project)
     return task
 
 
@@ -137,6 +139,7 @@ def verify_task_deleter(task: TaskDep, user: CurrentUser) -> Task:
     """Người tạo / PM / admin mới được xóa task."""
     if not permissions.can_delete_task(user, task):
         raise ForbiddenException(messages.TASK_DELETE_FORBIDDEN)
+    ensure_project_active(task.project)
     return task
 
 
@@ -151,6 +154,7 @@ def get_task_for_assign(task_id: int, db: DbSession, user: CurrentUser) -> Task:
         raise NotFoundException(messages.TASK_NOT_FOUND)
     if not permissions.can_manage_project(user, task.project):
         raise ForbiddenException(messages.TASK_ASSIGN_FORBIDDEN)
+    ensure_project_active(task.project)
     return task
 
 
@@ -167,6 +171,7 @@ def verify_comment_modifier(
         raise NotFoundException(messages.COMMENT_NOT_FOUND)
     if not permissions.can_modify_comment(user, comment):
         raise ForbiddenException(messages.COMMENT_MODIFY_FORBIDDEN)
+    ensure_project_active(comment.task.project)
     return comment
 
 
@@ -187,6 +192,12 @@ Pagination = Annotated[PageParams, Depends(get_pagination)]
 
 
 # ---------- Helper dùng chung cho router ----------
+def ensure_project_active(project: Project) -> None:
+    """Project đã archive thì task / comment bên trong chỉ còn đọc được -> 409."""
+    if project.status == ProjectStatus.ARCHIVED:
+        raise ConflictException(messages.PROJECT_ARCHIVED)
+
+
 def get_tags_by_ids(db: Session, tag_ids: list[int]) -> list[Tag]:
     """Body tham chiếu tới tag không tồn tại -> 400 (khác 404 dành cho resource trên URL)."""
     tags = crud.tag.get_many(db, tag_ids)

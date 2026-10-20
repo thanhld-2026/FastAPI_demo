@@ -19,6 +19,7 @@ ADMIN_CANNOT_DEMOTE_SELF = "Admins cannot demote or deactivate themselves"
 # --- Project ---
 PROJECT_NOT_FOUND = "Project not found"
 PROJECT_MANAGER_REQUIRED = "Only the project manager or an admin can perform this action"
+PROJECT_ARCHIVED = "Project is archived, its tasks and comments are read-only"
 
 # --- Task ---
 TASK_NOT_FOUND = "Task not found"

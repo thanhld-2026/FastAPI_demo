@@ -7,7 +7,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import PROJECT_NAME_MAX_LENGTH
 from app.database import Base
-from app.models.base import TimestampMixin
+from app.models.base import TimestampMixin, enum_column
+from app.models.enums import ProjectStatus
 
 if TYPE_CHECKING:
     from app.models.task import Task
@@ -20,6 +21,12 @@ class Project(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(PROJECT_NAME_MAX_LENGTH), index=True)
     description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[ProjectStatus] = mapped_column(
+        enum_column(ProjectStatus),
+        default=ProjectStatus.ACTIVE,
+        server_default=ProjectStatus.ACTIVE.value,
+        index=True,
+    )
     # Người tạo project = Project Manager (PM) của project đó
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
 

@@ -109,3 +109,67 @@ def test_user_profile_contains_projects_and_assigned_tasks(
     assert [t["title"] for t in dev_profile["assigned_tasks"]] == ["Login screen"]
     assert "email" not in dev_profile  # profile công khai không lộ email
     assert client.get("/api/v1/users/ghost/profile").status_code == 404
+
+
+def test_archived_project_is_read_only(client, make_user, make_project, make_task):
+    pm = make_user("pmuser")
+    other = make_user("other")
+    dev = make_user("dev")
+    project = make_project(pm)
+    task = make_task(project["id"], pm)
+    url = f"/api/v1/projects/{project['id']}"
+    task_url = f"/api/v1/tasks/{task['id']}"
+    comment = client.post(
+        f"{task_url}/comments", json={"content": "before archive"}, headers=pm["headers"]
+    ).json()
+    comment_url = f"{task_url}/comments/{comment['id']}"
+
+    forbidden = client.post(f"{url}/archive", headers=other["headers"])
+    archived = client.post(f"{url}/archive", headers=pm["headers"])
+    again = client.post(f"{url}/archive", headers=pm["headers"])  # idempotent
+
+    assert forbidden.status_code == 403
+    assert archived.status_code == 200
+    assert archived.json()["status"] == "ARCHIVED"
+    assert again.status_code == 200
+    # Mọi thao tác ghi lên task / comment trong project đã archive -> 409
+    writes = [
+        client.post(f"{url}/tasks", json={"title": "X"}, headers=pm["headers"]),
+        client.put(task_url, json={"status": "DONE"}, headers=pm["headers"]),
+        client.post(f"{task_url}/assign", json={"assignee_id": dev["id"]}, headers=pm["headers"]),
+        client.post(f"{task_url}/comments", json={"content": "hi"}, headers=pm["headers"]),
+        client.put(comment_url, json={"content": "edited"}, headers=pm["headers"]),
+        client.delete(comment_url, headers=pm["headers"]),
+        client.delete(task_url, headers=pm["headers"]),
+    ]
+    assert [r.status_code for r in writes] == [409] * len(writes)
+    # Đọc vẫn bình thường
+    assert client.get(f"{url}/tasks").status_code == 200
+    assert client.get(task_url).status_code == 200
+
+
+def test_unarchive_project_allows_writes_again(client, make_user, make_project):
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    url = f"/api/v1/projects/{project['id']}"
+    client.post(f"{url}/archive", headers=pm["headers"])
+
+    reopened = client.post(f"{url}/unarchive", headers=pm["headers"])
+    created = client.post(f"{url}/tasks", json={"title": "Back to work"}, headers=pm["headers"])
+
+    assert reopened.json()["status"] == "ACTIVE"
+    assert created.status_code == 201
+
+
+def test_filter_projects_by_status(client, make_user, make_project):
+    pm = make_user("pmuser")
+    make_project(pm, name="Active one")
+    old = make_project(pm, name="Old one")
+    client.post(f"/api/v1/projects/{old['id']}/archive", headers=pm["headers"])
+
+    active = client.get("/api/v1/projects", params={"status": "ACTIVE"}).json()
+    archived = client.get("/api/v1/projects", params={"status": "ARCHIVED"}).json()
+
+    assert [p["name"] for p in active["items"]] == ["Active one"]
+    assert [p["name"] for p in archived["items"]] == ["Old one"]
+    assert client.get("/api/v1/projects", params={"status": "DELETED"}).status_code == 422

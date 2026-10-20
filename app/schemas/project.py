@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import Field, model_validator
 
 from app.core.constants import PROJECT_NAME_MAX_LENGTH
+from app.models.enums import ProjectStatus
 from app.schemas.common import InputSchema, ORMSchema, reject_null_fields
 from app.schemas.task import TaskBrief
 from app.schemas.user import UserPublic
@@ -36,6 +37,7 @@ class ProjectOut(ORMSchema):
     id: int
     name: str
     description: str | None
+    status: ProjectStatus
     owner: UserPublic  # nested model: PM của project
     created_at: datetime
     updated_at: datetime

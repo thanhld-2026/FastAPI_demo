@@ -61,7 +61,7 @@ def get_task(task: TaskDep):
     "/{task_id}",
     response_model=TaskOut,
     summary="Cập nhật task (người tạo / người được assign / PM / Admin)",
-    responses=error_responses(400, 401, 403, 404),
+    responses=error_responses(400, 401, 403, 404, 409),
 )
 def update_task(data: TaskUpdate, task: EditableTask, current_user: CurrentUser, db: DbSession):
     tags = get_tags_by_ids(db, data.tag_ids) if data.tag_ids is not None else None
@@ -72,7 +72,7 @@ def update_task(data: TaskUpdate, task: EditableTask, current_user: CurrentUser,
     "/{task_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Xóa task (người tạo / PM / Admin)",
-    responses=error_responses(401, 403, 404),
+    responses=error_responses(401, 403, 404, 409),
 )
 def delete_task(task: DeletableTask, db: DbSession):
     crud.task.delete(db, task)
@@ -82,7 +82,7 @@ def delete_task(task: DeletableTask, db: DbSession):
     "/{task_id}/assign",
     response_model=TaskOut,
     summary="[PM/Admin] Giao task cho user",
-    responses=error_responses(400, 401, 403, 404),
+    responses=error_responses(400, 401, 403, 404, 409),
 )
 def assign_task(data: TaskAssign, task: AssignableTask, current_user: CurrentUser, db: DbSession):
     return task_service.assign_task(

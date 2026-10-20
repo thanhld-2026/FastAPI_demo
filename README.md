@@ -64,7 +64,7 @@ Tất cả dùng chung mật khẩu **`Password123`**.
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 72 test, khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 76 test, khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 ruff check .    # lint (cấu hình trong pyproject.toml)
 mypy            # kiểm tra kiểu cho app/ và scripts/
@@ -128,6 +128,10 @@ Quy ước:
 - Mọi API nằm dưới prefix `/api/v1`.
 - Danh sách phân trang bằng `page` (từ 1) + `limit` (mặc định 20, tối đa 100),
   response có `total` và `pages` (tổng số trang).
+- Task: status `TODO` / `IN_PROGRESS` / `IN_REVIEW` / `DONE`, priority `LOW` / `MEDIUM` / `HIGH` / `URGENT`.
+- Project: `ACTIVE` / `ARCHIVED`. Project đã archive thì task và comment bên trong chỉ đọc được
+  (mọi thao tác ghi trả `409`), PM / Admin unarchive để mở lại.
+- Cột "Mục đề": số mục của tutorial; `PL n` là feature n trong phụ lục đặc tả sample app.
 
 | Method | Endpoint | Quyền | Mục đề |
 |---|---|---|---|
@@ -138,10 +142,11 @@ Quy ước:
 | GET | `/api/v1/users/{username}/profile` | Công khai | 3 |
 | GET | `/api/v1/users` | Admin | 5 |
 | PATCH | `/api/v1/users/{user_id}` | Admin (đổi role, khóa tài khoản) | 5 |
-| GET | `/api/v1/projects` | Công khai (phân trang) | 2 |
+| GET | `/api/v1/projects?status=` | Công khai (lọc theo status + phân trang) | 2, PL 4 |
 | POST | `/api/v1/projects` | Đã đăng nhập (người tạo thành PM) | 2 |
 | GET | `/api/v1/projects/{project_id}` | Công khai (kèm tasks lồng nhau) | 2, 3 |
 | PUT / DELETE | `/api/v1/projects/{project_id}` | PM / Admin | 5 |
+| POST | `/api/v1/projects/{project_id}/archive`, `.../unarchive` | PM / Admin (idempotent) | PL 4 |
 | GET | `/api/v1/projects/{project_id}/tasks` | Công khai (lọc + phân trang) | 3, 5 |
 | POST | `/api/v1/projects/{project_id}/tasks` | Đã đăng nhập | 3 |
 | GET | `/api/v1/tasks?status=&priority=&project_id=&assignee_id=&q=` | Công khai (lọc + phân trang) | 5 |
@@ -163,5 +168,5 @@ Lỗi luôn trả về dạng `{"detail": "..."}`, mã lỗi của từng endpoi
 - `403`: đã đăng nhập nhưng không đủ quyền.
 - `404`: resource trên URL không tồn tại.
 - `400`: body tham chiếu tới dữ liệu không tồn tại (tag_ids, assignee_id).
-- `409`: trùng dữ liệu (username, email, tag).
+- `409`: trùng dữ liệu (username, email, tag) hoặc project đã archive.
 - `422`: dữ liệu sai định dạng.
