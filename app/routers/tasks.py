@@ -1,9 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
 
 from app import crud, permissions
-from app.dependencies import CurrentUser, DbSession, TaskDep, load_tags_or_400
+from app.core import messages
+from app.core.constants import TASK_SEARCH_MAX_LENGTH
+from app.core.exceptions import ForbiddenException, NotFoundException
+from app.dependencies import CurrentUser, DbSession, TaskDep, get_tags_by_ids
 from app.models import TaskPriority, TaskStatus
 from app.schemas.common import Page
 from app.schemas.task import BookmarkOut, TaskOut, TaskUpdate
@@ -18,7 +21,10 @@ def list_tasks(
     priority: TaskPriority | None = None,
     project_id: int | None = None,
     assignee_id: int | None = None,
-    q: Annotated[str | None, Query(min_length=1, max_length=100, description="Tìm theo tiêu đề")] = None,
+    q: Annotated[
+        str | None,
+        Query(min_length=1, max_length=TASK_SEARCH_MAX_LENGTH, description="Tìm theo tiêu đề"),
+    ] = None,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ):
@@ -47,8 +53,8 @@ def get_task(task: TaskDep):
 )
 def update_task(data: TaskUpdate, task: TaskDep, current_user: CurrentUser, db: DbSession):
     if not permissions.can_edit_task(current_user, task):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Not allowed to edit this task")
-    tags = load_tags_or_400(db, data.tag_ids) if data.tag_ids is not None else None
+        raise ForbiddenException(messages.TASK_EDIT_FORBIDDEN)
+    tags = get_tags_by_ids(db, data.tag_ids) if data.tag_ids is not None else None
     return crud.task.update(db, task, data, tags=tags)
 
 
@@ -59,7 +65,7 @@ def update_task(data: TaskUpdate, task: TaskDep, current_user: CurrentUser, db: 
 )
 def delete_task(task: TaskDep, current_user: CurrentUser, db: DbSession):
     if not permissions.can_delete_task(current_user, task):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Not allowed to delete this task")
+        raise ForbiddenException(messages.TASK_DELETE_FORBIDDEN)
     crud.task.delete(db, task)
 
 
@@ -68,7 +74,7 @@ def delete_task(task: TaskDep, current_user: CurrentUser, db: DbSession):
 )
 def bookmark_task(task_id: int, current_user: CurrentUser, db: DbSession):
     if not crud.task.exists_by_id(db, task_id):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise NotFoundException(messages.TASK_NOT_FOUND)
     crud.task.add_bookmark(db, user_id=current_user.id, task_id=task_id)
     return BookmarkOut(task_id=task_id, bookmarked=True)
 
@@ -76,6 +82,6 @@ def bookmark_task(task_id: int, current_user: CurrentUser, db: DbSession):
 @router.delete("/{task_id}/bookmark", response_model=BookmarkOut, summary="Bỏ bookmark task")
 def unbookmark_task(task_id: int, current_user: CurrentUser, db: DbSession):
     if not crud.task.exists_by_id(db, task_id):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise NotFoundException(messages.TASK_NOT_FOUND)
     crud.task.remove_bookmark(db, user_id=current_user.id, task_id=task_id)
     return BookmarkOut(task_id=task_id, bookmarked=False)

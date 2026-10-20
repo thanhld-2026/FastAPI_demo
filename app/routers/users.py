@@ -1,10 +1,18 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.exc import IntegrityError
 
 from app import crud
+from app.core import messages
+from app.core.exceptions import (
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from app.dependencies import AdminUser, CurrentUser, DbSession, verify_admin_role
 from app.models import UserRole
 from app.schemas.common import Page
@@ -24,16 +32,16 @@ router = APIRouter(prefix="/api/users", tags=["Users"])
 )
 def register(data: UserCreate, db: DbSession):
     if crud.user.get_by_username(db, data.username):
-        raise HTTPException(status.HTTP_409_CONFLICT, detail="Username already registered")
+        raise ConflictException(messages.USERNAME_TAKEN)
     if crud.user.get_by_email(db, data.email):
-        raise HTTPException(status.HTTP_409_CONFLICT, detail="Email already registered")
+        raise ConflictException(messages.EMAIL_TAKEN)
     try:
         return crud.user.create(db, data)
     except IntegrityError:
         # 2 request đăng ký cùng username gần như đồng thời: cả 2 đều qua bước kiểm tra
         # ở trên, nhưng UNIQUE constraint trong DB vẫn chặn được request thứ 2.
         db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, detail="Username or email already registered")
+        raise ConflictException(messages.USERNAME_OR_EMAIL_TAKEN) from None
 
 
 @router.post("/login", response_model=Token, summary="Đăng nhập (trả về access_token)")
@@ -42,13 +50,9 @@ def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbSession):
     (field `username` chấp nhận cả username hoặc email)."""
     user = crud.user.authenticate(db, form.username, form.password)
     if user is None:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise UnauthorizedException(messages.INCORRECT_LOGIN)
     if not user.is_active:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Inactive user")
+        raise ForbiddenException(messages.INACTIVE_USER)
     return Token(access_token=create_access_token(user.id))
 
 
@@ -61,7 +65,7 @@ def read_me(current_user: CurrentUser):
 def update_me(data: UserUpdate, current_user: CurrentUser, db: DbSession):
     email_changed = data.email and data.email.lower() != current_user.email
     if email_changed and crud.user.get_by_email(db, data.email):
-        raise HTTPException(status.HTTP_409_CONFLICT, detail="Email already registered")
+        raise ConflictException(messages.EMAIL_TAKEN)
     return crud.user.update(db, current_user, data)
 
 
@@ -90,11 +94,9 @@ def list_users(
 def admin_update_user(user_id: int, data: AdminUserUpdate, admin: AdminUser, db: DbSession):
     user = crud.user.get_by_id(db, user_id)
     if user is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise NotFoundException(messages.USER_NOT_FOUND)
     if user.id == admin.id and (data.role == UserRole.MEMBER or data.is_active is False):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, detail="Admins cannot demote or deactivate themselves"
-        )
+        raise BadRequestException(messages.ADMIN_CANNOT_DEMOTE_SELF)
     return crud.user.admin_update(db, user, data)
 
 
@@ -102,5 +104,5 @@ def admin_update_user(user_id: int, data: AdminUserUpdate, admin: AdminUser, db:
 def get_profile(username: str, db: DbSession):
     user = crud.user.get_profile(db, username)
     if user is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise NotFoundException(messages.USER_NOT_FOUND)
     return user

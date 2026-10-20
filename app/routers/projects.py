@@ -1,16 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
 
 from app import crud
-from app.dependencies import (
-    CurrentUser,
-    DbSession,
-    ManagedProject,
-    get_project_or_404,
-    load_tags_or_400,
-)
-from app.models import Project, TaskPriority, TaskStatus
+from app.core import messages
+from app.core.exceptions import NotFoundException
+from app.dependencies import CurrentUser, DbSession, ManagedProject, ProjectDep, get_tags_by_ids
+from app.models import TaskPriority, TaskStatus
 from app.schemas.common import Page
 from app.schemas.project import ProjectCreate, ProjectDetail, ProjectOut, ProjectUpdate
 from app.schemas.task import TaskCreate, TaskOut
@@ -44,7 +40,7 @@ def create_project(data: ProjectCreate, current_user: CurrentUser, db: DbSession
 def get_project(project_id: int, db: DbSession):
     project = crud.project.get_detail(db, project_id)
     if project is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Project not found")
+        raise NotFoundException(messages.PROJECT_NOT_FOUND)
     return project
 
 
@@ -66,7 +62,7 @@ def delete_project(project: ManagedProject, db: DbSession):
     summary="Danh sách task của project (lọc + phân trang)",
 )
 def list_project_tasks(
-    project: Annotated[Project, Depends(get_project_or_404)],
+    project: ProjectDep,
     db: DbSession,
     # alias="status": trên URL vẫn là ?status=..., đặt tên biến khác để không đè module `status`
     task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
@@ -87,10 +83,7 @@ def list_project_tasks(
     summary="Tạo task trong project",
 )
 def create_project_task(
-    data: TaskCreate,
-    project: Annotated[Project, Depends(get_project_or_404)],
-    current_user: CurrentUser,
-    db: DbSession,
+    data: TaskCreate, project: ProjectDep, current_user: CurrentUser, db: DbSession
 ):
-    tags = load_tags_or_400(db, data.tag_ids)
+    tags = get_tags_by_ids(db, data.tag_ids)
     return crud.task.create(db, project=project, data=data, tags=tags, creator=current_user)

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.constants import PROJECT_NAME_MAX_LENGTH
 from app.database import Base
 from app.models.base import TimestampMixin
 
@@ -17,7 +18,7 @@ class Project(TimestampMixin, Base):
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), index=True)
+    name: Mapped[str] = mapped_column(String(PROJECT_NAME_MAX_LENGTH), index=True)
     description: Mapped[str | None] = mapped_column(Text)
     # Người tạo project = Project Manager (PM) của project đó
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)

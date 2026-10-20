@@ -2,6 +2,8 @@ from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
+from app.core import messages
+
 T = TypeVar("T")
 
 
@@ -29,3 +31,11 @@ class Page(BaseModel, Generic[T]):
     total: int
     skip: int
     limit: int
+
+
+def reject_null_fields(schema: BaseModel, *fields: str) -> None:
+    """Dùng cho schema partial update: field không gửi thì bỏ qua, nhưng gửi `null`
+    cho field NOT NULL thì báo lỗi 422 (thay vì âm thầm bỏ qua hoặc ghi NULL xuống DB)."""
+    for field in fields:
+        if field in schema.model_fields_set and getattr(schema, field) is None:
+            raise ValueError(messages.FIELD_CANNOT_BE_NULL.format(field=field))
