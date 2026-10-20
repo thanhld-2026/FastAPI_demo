@@ -13,6 +13,8 @@ os.environ.update(
     {
         "DATABASE_URL": "sqlite://",
         "SECRET_KEY": "test-secret-key-that-is-at-least-32-characters-long",
+        "REDIS_URL": "",
+        "EMAIL_ENABLED": "false",
         "BCRYPT_ROUNDS": "4",  # hash nhanh hơn cho test (production dùng 12)
     }
 )
@@ -138,3 +140,16 @@ def make_task(client: TestClient) -> Callable[..., dict]:
         return resp.json()
 
     return _make_task
+
+
+@pytest.fixture
+def sql_log() -> Iterator[list[str]]:
+    """Ghi lại mọi câu SQL đã chạy -> dùng để đếm query, chứng minh không bị N+1."""
+    statements: list[str] = []
+
+    def _before_execute(conn, cursor, statement, *args):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _before_execute)
+    yield statements
+    event.remove(engine, "before_cursor_execute", _before_execute)

@@ -27,5 +27,18 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     BCRYPT_ROUNDS: int = Field(default=12, ge=4, le=16)
 
+    # --- Redis cache ---
+    REDIS_URL: str | None = None  # None / rỗng -> tắt cache
+    TAGS_CACHE_TTL: int = 300  # giây
+
+    # --- Email ---
+    EMAIL_ENABLED: bool = False  # False -> chỉ ghi log thay vì gửi mail thật
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 1025
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_USE_TLS: bool = False
+    EMAIL_FROM: str = "TaskHub <no-reply@taskhub.local>"
+
 
 settings = Settings()

@@ -1,4 +1,4 @@
-# Bật PostgreSQL cho môi trường dev:   docker compose up -d db
+# Chạy hạ tầng cho môi trường dev:   docker compose up -d db redis mailpit
 #
 # Các biến ${...} được đọc từ file .env cùng thư mục (giá trị sau :- là mặc định).
 
@@ -19,6 +19,25 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # SMTP server giả lập để test email: mọi mail gửi tới đều hiện ở web UI http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:v1.31
+    restart: unless-stopped
+    ports:
+      - "8025:8025" # web UI
+      - "1025:1025" # SMTP
 
 volumes:
   pgdata:
