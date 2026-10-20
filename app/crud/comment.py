@@ -10,7 +10,9 @@ from app.schemas.common import PageParams
 def list_for_task(
     db: Session, task_id: int, pagination: PageParams
 ) -> tuple[list[Comment], int]:
-    total = db.scalar(select(func.count()).select_from(Comment).where(Comment.task_id == task_id))
+    total = db.execute(
+        select(func.count()).select_from(Comment).where(Comment.task_id == task_id)
+    ).scalar_one()
     stmt = (
         select(Comment)
         .where(Comment.task_id == task_id)

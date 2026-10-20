@@ -61,11 +61,13 @@ Tất cả dùng chung mật khẩu **`Password123`**.
 
 Đăng nhập trên Swagger: bấm nút **Authorize**, nhập username/password (hoặc email/password).
 
-## 4. Chạy test
+## 4. Chạy test & lint
 
 ```bash
 pytest          # 72 test, khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
+ruff check .    # lint (cấu hình trong pyproject.toml)
+mypy            # kiểm tra kiểu cho app/ và scripts/
 ```
 
 ## 5. Cấu trúc thư mục

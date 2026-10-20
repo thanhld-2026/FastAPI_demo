@@ -1,12 +1,10 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Generic, Self, TypeVar
+from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict
 
 from app.core import messages
-
-T = TypeVar("T")
 
 
 class InputSchema(BaseModel):
@@ -34,7 +32,7 @@ class PageParams:
     limit: int
 
 
-class Page(BaseModel, Generic[T]):
+class Page[T](BaseModel):
     """Response phân trang dùng chung: Page[TaskOut], Page[ProjectOut], ..."""
 
     items: list[T]

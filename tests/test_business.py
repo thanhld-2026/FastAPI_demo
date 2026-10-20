@@ -90,7 +90,10 @@ def test_assign_to_missing_or_inactive_user_returns_400(client, make_user, setup
 
     assert missing.status_code == 400
     assert inactive.status_code == 400
-    assert client.post("/api/tasks/999/assign", json={"assignee_id": None}, headers=pm["headers"]).status_code == 404
+    unknown_task = client.post(
+        "/api/tasks/999/assign", json={"assignee_id": None}, headers=pm["headers"]
+    )
+    assert unknown_task.status_code == 404
 
 
 def test_assignee_id_must_be_positive(client, setup_task):

@@ -31,7 +31,7 @@ def get_detail(db: Session, project_id: int) -> Project | None:
 
 
 def list_projects(db: Session, pagination: PageParams) -> tuple[list[Project], int]:
-    total = db.scalar(select(func.count()).select_from(Project))
+    total = db.execute(select(func.count()).select_from(Project)).scalar_one()
     stmt = (
         select(Project)
         .options(joinedload(Project.owner))  # tránh N+1 khi trả về owner của từng project

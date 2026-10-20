@@ -21,7 +21,9 @@ def test_register_login_and_create_task_flow(client):
     assert register.status_code == 201
 
     # 2. Đăng nhập -> nhận access token
-    login = client.post("/api/users/login", data={"username": "alice", "password": DEFAULT_PASSWORD})
+    login = client.post(
+        "/api/users/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
+    )
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 

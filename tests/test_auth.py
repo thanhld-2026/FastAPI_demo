@@ -167,7 +167,9 @@ def test_deactivated_user_is_blocked(client, make_user):
     admin = make_user("boss", admin=True)
     bob = make_user("bob")
 
-    resp = client.patch(f"/api/users/{bob['id']}", json={"is_active": False}, headers=admin["headers"])
+    resp = client.patch(
+        f"/api/users/{bob['id']}", json={"is_active": False}, headers=admin["headers"]
+    )
 
     assert resp.status_code == 200
     # Token cũ vẫn còn hạn nhưng get_current_active_user chặn lại

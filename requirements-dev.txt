@@ -3,3 +3,6 @@
 pytest==9.1.1
 httpx==0.28.1         # TestClient của FastAPI dùng httpx
 fakeredis==2.40.0     # Redis giả lập trong bộ nhớ để test cache
+
+ruff==0.17.1          # lint
+mypy==2.4.0           # kiểm tra kiểu

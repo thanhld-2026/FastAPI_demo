@@ -33,6 +33,12 @@ def get(db: Session, task_id: int) -> Task | None:
     return db.scalar(stmt)
 
 
+def _reload(db: Session, task_id: int) -> Task:
+    """Đọc lại task vừa ghi (chắc chắn tồn tại) kèm eager loading để trả về response."""
+    stmt = select(Task).where(Task.id == task_id).options(*TASK_LOAD_OPTIONS)
+    return db.scalars(stmt).one()
+
+
 def get_for_update(db: Session, task_id: int) -> Task | None:
     """SELECT ... FOR UPDATE: khóa dòng task tới khi commit/rollback.
 
@@ -76,7 +82,7 @@ def list_tasks(
         # autoescape: ký tự % và _ trong từ khóa được hiểu là ký tự thường
         conditions.append(Task.title.icontains(search, autoescape=True))
 
-    total = db.scalar(select(func.count()).select_from(Task).where(*conditions))
+    total = db.execute(select(func.count()).select_from(Task).where(*conditions)).scalar_one()
     stmt = (
         select(Task)
         .where(*conditions)
@@ -95,7 +101,7 @@ def create(
     db.add(task)
     activity_crud.add(db, task=task, actor=creator, action=ActivityAction.CREATED)
     db.commit()  # task + activity được lưu trong cùng 1 transaction
-    return get(db, task.id)
+    return _reload(db, task.id)
 
 
 def update(
@@ -118,7 +124,7 @@ def update(
             detail=f"changed: {', '.join(changed)}",
         )
     db.commit()
-    return get(db, task.id)
+    return _reload(db, task.id)
 
 
 def delete(db: Session, task: Task) -> None:
@@ -147,7 +153,7 @@ def assign(db: Session, *, task: Task, assignee: User | None, actor: User) -> Ta
             detail=f"assigned to {assignee.username}" if assignee else "unassigned",
         )
         db.commit()
-    return get(db, task.id)
+    return _reload(db, task.id)
 
 
 # ---------- Bookmark (Many-to-Many User <-> Task) ----------
@@ -182,9 +188,9 @@ def remove_bookmark(db: Session, *, user_id: int, task_id: int) -> None:
 def list_bookmarked(
     db: Session, user_id: int, pagination: PageParams
 ) -> tuple[list[Task], int]:
-    total = db.scalar(
+    total = db.execute(
         select(func.count()).select_from(task_bookmarks).where(task_bookmarks.c.user_id == user_id)
-    )
+    ).scalar_one()
     stmt = (
         select(Task)
         .join(task_bookmarks, task_bookmarks.c.task_id == Task.id)

@@ -21,17 +21,17 @@ os.environ.update(
     }
 )
 
-from collections.abc import Callable, Iterator  # noqa: E402
+from collections.abc import Callable, Iterator
 
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import create_engine, event, update  # noqa: E402
-from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
-from sqlalchemy.pool import StaticPool  # noqa: E402
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event, update
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from app.database import Base, get_db  # noqa: E402
-from app.main import app  # noqa: E402
-from app.models import User, UserRole  # noqa: E402
+from app.database import Base, get_db
+from app.main import app
+from app.models import User, UserRole
 
 # StaticPool: mọi session dùng chung 1 connection -> cùng nhìn thấy 1 DB in-memory
 engine = create_engine(

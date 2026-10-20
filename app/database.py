@@ -30,7 +30,7 @@ engine = create_engine(settings.DATABASE_URL, echo=settings.DB_ECHO, pool_pre_pi
 SessionLocal = sessionmaker(bind=engine, autoflush=False)
 
 
-def get_db() -> Generator[Session, None, None]:
+def get_db() -> Generator[Session]:
     """Dependency: mỗi request dùng 1 session riêng, request xong thì đóng.
 
     - Nếu có exception -> rollback để không lưu dữ liệu dở dang.

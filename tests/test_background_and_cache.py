@@ -35,7 +35,9 @@ def test_comment_notifies_task_creator_and_assignee(
     )
 
     resp = client.post(
-        f"/api/tasks/{task['id']}/comments", json={"content": "Please review"}, headers=pm["headers"]
+        f"/api/tasks/{task['id']}/comments",
+        json={"content": "Please review"},
+        headers=pm["headers"],
     )
 
     # TestClient chạy xong background task rồi mới trả về -> kiểm tra ngay được
@@ -51,7 +53,9 @@ def test_commenter_does_not_notify_themselves(
     pm = make_user("pmuser")
     task = make_task(make_project(pm)["id"], pm)  # pm vừa là creator vừa là người comment
 
-    client.post(f"/api/tasks/{task['id']}/comments", json={"content": "Note"}, headers=pm["headers"])
+    client.post(
+        f"/api/tasks/{task['id']}/comments", json={"content": "Note"}, headers=pm["headers"]
+    )
 
     assert sent_emails == []
 

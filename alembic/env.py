@@ -1,16 +1,15 @@
 """Cấu hình chạy migration của Alembic.
 
 Các lệnh thường dùng:
-    alembic revision --autogenerate -m "mô tả thay đổi"   # so sánh model với DB -> sinh file migration
+    alembic revision --autogenerate -m "mô tả thay đổi"   # so sánh model với DB, sinh migration
     alembic upgrade head                                  # áp dụng mọi migration chưa chạy
     alembic downgrade -1                                  # quay lui 1 migration
 """
 
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
-
 from alembic import context
+from sqlalchemy import engine_from_config, pool
 
 import app.models  # noqa: F401  (import để mọi model được đăng ký vào Base.metadata)
 from app.config import settings
