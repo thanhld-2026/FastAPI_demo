@@ -7,7 +7,8 @@ Chuỗi phụ thuộc xác thực / phân quyền:
                         load user từ DB)                              ->  verify_project_manager
                                                                           (chỉ PM/admin của project)
 
-Tương tự cho task: verify_task_editor / verify_task_deleter (quyền sửa / xóa task).
+Tương tự cho task / comment: verify_task_editor, verify_task_deleter, get_task_for_assign,
+verify_comment_modifier.
 Endpoint chỉ cần khai báo `current_user: CurrentUser` là FastAPI tự chạy cả chuỗi.
 """
 
@@ -28,7 +29,7 @@ from app.core.exceptions import (
     UnauthorizedException,
 )
 from app.database import get_db
-from app.models import Project, Tag, Task, User
+from app.models import Comment, Project, Tag, Task, User
 from app.schemas.common import PageParams
 from app.security import decode_access_token
 
@@ -140,6 +141,36 @@ def verify_task_deleter(task: TaskDep, user: CurrentUser) -> Task:
 
 
 DeletableTask = Annotated[Task, Depends(verify_task_deleter)]
+
+
+def get_task_for_assign(task_id: int, db: DbSession, user: CurrentUser) -> Task:
+    """Khóa dòng task (SELECT ... FOR UPDATE) tới hết transaction rồi mới kiểm tra quyền:
+    2 PM assign cùng 1 task cùng lúc thì request sau phải chờ request trước commit xong."""
+    task = crud.task.get_for_update(db, task_id)
+    if task is None:
+        raise NotFoundException(messages.TASK_NOT_FOUND)
+    if not permissions.can_manage_project(user, task.project):
+        raise ForbiddenException(messages.TASK_ASSIGN_FORBIDDEN)
+    return task
+
+
+AssignableTask = Annotated[Task, Depends(get_task_for_assign)]
+
+
+def verify_comment_modifier(
+    task_id: int, comment_id: int, db: DbSession, user: CurrentUser
+) -> Comment:
+    """Chỉ tác giả comment, PM của project hoặc admin mới được sửa / xóa.
+    Lọc theo cả task_id để chặn truy cập chéo: /tasks/1/comments/<id comment của task 2>."""
+    comment = crud.comment.get(db, task_id=task_id, comment_id=comment_id)
+    if comment is None:
+        raise NotFoundException(messages.COMMENT_NOT_FOUND)
+    if not permissions.can_modify_comment(user, comment):
+        raise ForbiddenException(messages.COMMENT_MODIFY_FORBIDDEN)
+    return comment
+
+
+ModifiableComment = Annotated[Comment, Depends(verify_comment_modifier)]
 
 
 # ---------- Phân trang ----------

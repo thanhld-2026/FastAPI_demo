@@ -21,6 +21,14 @@ PROJECT_MANAGER_REQUIRED = "Only the project manager or an admin can perform thi
 TASK_NOT_FOUND = "Task not found"
 TASK_EDIT_FORBIDDEN = "Not allowed to edit this task"
 TASK_DELETE_FORBIDDEN = "Not allowed to delete this task"
+TASK_ASSIGN_FORBIDDEN = "Only the project manager or an admin can assign tasks"
+ASSIGNEE_NOT_FOUND = "Assignee not found or inactive"
+
+# --- Comment ---
+COMMENT_NOT_FOUND = "Comment not found"
+COMMENT_MODIFY_FORBIDDEN = (
+    "Only the comment author, the project manager or an admin can modify this comment"
+)
 
 # --- Tag ---
 TAG_NOT_FOUND = "Tag not found"

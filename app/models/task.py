@@ -13,6 +13,7 @@ from app.models.base import TimestampMixin, enum_column
 from app.models.enums import TaskPriority, TaskStatus
 
 if TYPE_CHECKING:
+    from app.models.activity import TaskActivity
     from app.models.comment import Comment
     from app.models.project import Project
     from app.models.tag import Tag
@@ -65,4 +66,7 @@ class Task(TimestampMixin, Base):
     # One-to-Many
     comments: Mapped[list[Comment]] = relationship(
         back_populates="task", cascade="all, delete-orphan", order_by="Comment.id"
+    )
+    activities: Mapped[list[TaskActivity]] = relationship(
+        back_populates="task", cascade="all, delete-orphan", order_by="TaskActivity.id"
     )

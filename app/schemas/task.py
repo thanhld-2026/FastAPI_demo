@@ -1,11 +1,11 @@
 from datetime import date, datetime
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, PositiveInt, model_validator
 
 from app.core import messages
 from app.core.constants import TASK_TITLE_MAX_LENGTH
-from app.models.enums import TaskPriority, TaskStatus
+from app.models.enums import ActivityAction, TaskPriority, TaskStatus
 from app.schemas.common import InputSchema, ORMSchema, reject_null_fields
 from app.schemas.tag import TagOut
 from app.schemas.user import UserPublic
@@ -53,6 +53,12 @@ class TaskUpdate(InputSchema):
         return self
 
 
+class TaskAssign(InputSchema):
+    assignee_id: PositiveInt | None = Field(
+        description="User id được giao; null = bỏ assign", examples=[2]
+    )
+
+
 # ---------- Output ----------
 class TaskBrief(ORMSchema):
     """Dạng rút gọn, dùng khi lồng trong Project / Profile."""
@@ -83,3 +89,11 @@ class TaskOut(ORMSchema):
 class BookmarkOut(BaseModel):
     task_id: int
     bookmarked: bool
+
+
+class ActivityOut(ORMSchema):
+    id: int
+    action: ActivityAction
+    detail: str | None
+    actor: UserPublic
+    created_at: datetime

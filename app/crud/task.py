@@ -3,7 +3,9 @@ from sqlalchemy import exists, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.crud import activity as activity_crud
 from app.models import (
+    ActivityAction,
     Project,
     Tag,
     Task,
@@ -27,6 +29,21 @@ TASK_LOAD_OPTIONS = (
 
 def get(db: Session, task_id: int) -> Task | None:
     stmt = select(Task).where(Task.id == task_id).options(*TASK_LOAD_OPTIONS)
+    return db.scalar(stmt)
+
+
+def get_for_update(db: Session, task_id: int) -> Task | None:
+    """SELECT ... FOR UPDATE: khóa dòng task tới khi commit/rollback.
+
+    Nếu 2 PM cùng assign 1 task cùng lúc, request thứ 2 phải chờ request 1 xong
+    -> tránh race condition. (SQLite không hỗ trợ, SQLAlchemy tự bỏ qua mệnh đề này.)
+    """
+    stmt = (
+        select(Task)
+        .where(Task.id == task_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     return db.scalar(stmt)
 
 
@@ -76,15 +93,30 @@ def create(
 ) -> Task:
     task = Task(**data.model_dump(exclude={"tag_ids"}), project=project, creator=creator, tags=tags)
     db.add(task)
-    db.commit()
+    activity_crud.add(db, task=task, actor=creator, action=ActivityAction.CREATED)
+    db.commit()  # task + activity được lưu trong cùng 1 transaction
     return get(db, task.id)
 
 
-def update(db: Session, task: Task, data: TaskUpdate, *, tags: list[Tag] | None) -> Task:
-    for field, value in data.model_dump(exclude_unset=True, exclude={"tag_ids"}).items():
+def update(
+    db: Session, task: Task, data: TaskUpdate, *, tags: list[Tag] | None, actor: User
+) -> Task:
+    values = data.model_dump(exclude_unset=True, exclude={"tag_ids"})
+    changed = [field for field, value in values.items() if getattr(task, field) != value]
+    for field, value in values.items():
         setattr(task, field, value)
-    if tags is not None:
+    if tags is not None and {t.id for t in task.tags} != {t.id for t in tags}:
         task.tags = tags
+        changed.append("tags")
+
+    if changed:
+        activity_crud.add(
+            db,
+            task=task,
+            actor=actor,
+            action=ActivityAction.UPDATED,
+            detail=f"changed: {', '.join(changed)}",
+        )
     db.commit()
     return get(db, task.id)
 
@@ -92,6 +124,31 @@ def update(db: Session, task: Task, data: TaskUpdate, *, tags: list[Tag] | None)
 def delete(db: Session, task: Task) -> None:
     db.delete(task)
     db.commit()
+
+
+def assign(db: Session, *, task: Task, assignee: User | None, actor: User) -> Task:
+    """Giao task cho user — nghiệp vụ gồm 2 thao tác ghi trong CÙNG 1 transaction:
+
+    1. Cập nhật tasks.assignee_id
+    2. Ghi lịch sử vào task_activities
+
+    Nếu bước 2 lỗi -> rollback cả bước 1, không bao giờ có trạng thái
+    "task đã đổi người nhận nhưng không có lịch sử".
+    """
+    try:
+        task.assignee = assignee
+        activity_crud.add(
+            db,
+            task=task,
+            actor=actor,
+            action=ActivityAction.ASSIGNED,
+            detail=f"assigned to {assignee.username}" if assignee else "unassigned",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return get(db, task.id)
 
 
 # ---------- Bookmark (Many-to-Many User <-> Task) ----------
