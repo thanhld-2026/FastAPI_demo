@@ -8,6 +8,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import text
 
 from app.config import settings
+from app.core.exceptions import AppException, app_exception_handler
 from app.dependencies import DbSession
 from app.routers import projects, tags, tasks, users
 
@@ -16,6 +17,9 @@ app = FastAPI(
     version="1.0.0",
     description="RESTful API quản lý dự án & công việc (khóa học FastAPI).",
 )
+
+# Mọi AppException (NotFound, Forbidden, Conflict...) đều đi qua 1 handler chung
+app.add_exception_handler(AppException, app_exception_handler)
 
 
 # ---------- Routers ----------

@@ -21,10 +21,9 @@ from app.models import (
     User,
     UserRole,
 )
+from app.security import hash_password
 
-# Chưa có chức năng đăng nhập (mục 4) -> tạm lưu 1 giá trị không phải hash hợp lệ,
-# nên chưa ai đăng nhập được bằng các tài khoản mẫu này.
-UNUSABLE_PASSWORD = "!"
+PASSWORD = "Password123"
 
 USERS = [
     # username, full_name, role
@@ -51,7 +50,7 @@ def seed() -> None:
                 email=f"{username}@example.com",
                 full_name=full_name,
                 role=role,
-                hashed_password=UNUSABLE_PASSWORD,
+                hashed_password=hash_password(PASSWORD),
             )
             for username, full_name, role in USERS
         }
@@ -88,6 +87,7 @@ def seed() -> None:
             (mobile, "Push notification khi có comment", TaskStatus.TODO, TaskPriority.LOW, "bob", "dave", ["mobile"], 14),
         ]
 
+        tasks: list[Task] = []
         for project, title, status, priority, creator, assignee, tag_names, due_in in task_specs:
             task = Task(
                 project=project,
@@ -101,10 +101,15 @@ def seed() -> None:
             )
             db.add(task)
             db.flush()
+            tasks.append(task)
+
+        users["carol"].bookmarked_tasks.extend([tasks[2], tasks[5]])
 
         db.commit()  # toàn bộ dữ liệu mẫu được lưu trong 1 transaction
 
-        print("Seed data created.")
+        print(f"Seed data created. Accounts (password: {PASSWORD}):")
+        for username, _, role in USERS:
+            print(f"  - {username:<6} ({role.value})")
     finally:
         db.close()
 

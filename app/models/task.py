@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Date, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.constants import TASK_TITLE_MAX_LENGTH
 from app.database import Base
-from app.models.associations import task_tags
+from app.models.associations import task_bookmarks, task_tags
 from app.models.base import TimestampMixin, enum_column
 from app.models.enums import TaskPriority, TaskStatus
 
@@ -22,7 +23,7 @@ class Task(TimestampMixin, Base):
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    title: Mapped[str] = mapped_column(String(200))
+    title: Mapped[str] = mapped_column(String(TASK_TITLE_MAX_LENGTH))
     description: Mapped[str | None] = mapped_column(Text)
     # index cho các cột hay dùng để lọc (?status=...&priority=...)
     status: Mapped[TaskStatus] = mapped_column(
@@ -57,6 +58,9 @@ class Task(TimestampMixin, Base):
     # Many-to-Many
     tags: Mapped[list[Tag]] = relationship(
         secondary=task_tags, back_populates="tasks", order_by="Tag.name"
+    )
+    bookmarked_by: Mapped[list[User]] = relationship(
+        secondary=task_bookmarks, back_populates="bookmarked_tasks"
     )
     # One-to-Many
     comments: Mapped[list[Comment]] = relationship(
