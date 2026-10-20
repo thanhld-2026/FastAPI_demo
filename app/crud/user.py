@@ -46,7 +46,7 @@ def update(db: Session, user: User, data: UserUpdate) -> User:
 
 
 def admin_update(db: Session, user: User, data: AdminUserUpdate) -> User:
-    for field, value in data.model_dump(exclude_unset=True, exclude_none=True).items():
+    for field, value in data.model_dump(exclude_unset=True).items():
         setattr(user, field, value)
     db.commit()
     db.refresh(user)

@@ -27,6 +27,15 @@ uvicorn app.main:app --reload    # http://localhost:8000/docs
 Tài khoản mẫu: `admin`, `alice`, `bob`, `carol`, `dave`, dùng chung mật khẩu **`Password123`**.
 Trên Swagger bấm nút **Authorize** để đăng nhập.
 
+## Quy ước API
+
+- Các API **đọc** (GET) công khai, các API **ghi** đều cần đăng nhập. PM là người tạo project.
+  Khi làm RBAC theo workspace (phụ lục đặc tả), quyền đọc sẽ theo membership và cần đăng nhập.
+- Lỗi luôn trả về dạng `{"detail": "..."}`; các mã lỗi của từng endpoint có trên Swagger:
+  `400` body tham chiếu dữ liệu không tồn tại, `401` chưa đăng nhập / token sai,
+  `403` không đủ quyền, `404` không tìm thấy, `409` trùng dữ liệu, `422` sai định dạng.
+- Danh sách phân trang bằng `skip` / `limit` (mặc định 20, tối đa 100), response có `total`.
+
 ## Chạy test
 
 ```bash
@@ -41,7 +50,9 @@ app/
 ├── config.py       # Đọc cấu hình từ .env (pydantic-settings)
 ├── database.py     # engine, SessionLocal, Base, dependency get_db
 ├── security.py     # bcrypt hash/verify, tạo/giải mã JWT
-├── dependencies.py # get_db, get_current_user, ...
+├── dependencies.py # get_current_user, phân quyền, load resource, phân trang
+├── permissions.py  # Quy tắc phân quyền nghiệp vụ
+├── core/           # Exception + handler, message lỗi, hằng số, error responses
 ├── models/         # SQLAlchemy model = bảng trong DB
 ├── schemas/        # Pydantic schema = hình dạng dữ liệu vào/ra API
 ├── crud/           # Truy cập DB

@@ -1,5 +1,11 @@
 """Mục 3, 5: Task, lọc & phân trang, bookmark, phân quyền sửa/xóa task."""
 
+from datetime import date, timedelta
+
+from sqlalchemy import update
+
+from app.models import Task
+
 
 def test_create_task_requires_login(client, make_user, make_project):
     project = make_project(make_user("pmuser"))
@@ -145,3 +151,57 @@ def test_update_task_rejects_null_for_required_fields(client, make_user, make_pr
     resp = client.put(f"/api/tasks/{task['id']}", json={"title": None}, headers=pm["headers"])
 
     assert resp.status_code == 422
+
+
+def test_unbookmark_is_idempotent(client, make_user, make_project, make_task):
+    pm = make_user("pmuser")
+    task = make_task(make_project(pm)["id"], pm)
+
+    resp = client.delete(f"/api/tasks/{task['id']}/bookmark", headers=pm["headers"])
+
+    # Task chưa từng được bookmark: vẫn 200, trạng thái cuối cùng là "không bookmark"
+    assert resp.status_code == 200
+    assert resp.json() == {"task_id": task["id"], "bookmarked": False}
+
+
+def test_due_date_cannot_be_in_the_past(client, make_user, make_project, make_task):
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    task = make_task(project["id"], pm)
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+
+    created = client.post(
+        f"/api/projects/{project['id']}/tasks",
+        json={"title": "X", "due_date": yesterday},
+        headers=pm["headers"],
+    )
+    updated = client.put(
+        f"/api/tasks/{task['id']}", json={"due_date": yesterday}, headers=pm["headers"]
+    )
+
+    assert created.status_code == 422
+    assert updated.status_code == 422
+
+
+def test_overdue_task_can_still_be_updated(client, db, make_user, make_project, make_task):
+    pm = make_user("pmuser")
+    task = make_task(make_project(pm)["id"], pm)
+    # API không cho đặt ngày quá khứ -> sửa thẳng trong DB để có 1 task đã quá hạn
+    overdue = date.today() - timedelta(days=3)
+    db.execute(update(Task).where(Task.id == task["id"]).values(due_date=overdue))
+    db.commit()
+
+    resp = client.put(f"/api/tasks/{task['id']}", json={"status": "DONE"}, headers=pm["headers"])
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "DONE"
+    assert resp.json()["due_date"] == overdue.isoformat()
+
+
+def test_error_responses_are_documented(client):
+    spec = client.get("/openapi.json").json()
+    responses = spec["paths"]["/api/tasks/{task_id}"]["put"]["responses"]
+
+    assert {"400", "401", "403", "404", "422"} <= responses.keys()
+    schema = responses["404"]["content"]["application/json"]["schema"]
+    assert schema["$ref"].endswith("/ErrorResponse")

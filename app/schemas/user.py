@@ -65,6 +65,11 @@ class AdminUserUpdate(InputSchema):
     role: UserRole | None = None
     is_active: bool | None = None
 
+    @model_validator(mode="after")
+    def _reject_null(self):
+        reject_null_fields(self, "role", "is_active")
+        return self
+
 
 # ---------- Output ----------
 class UserPublic(ORMSchema):

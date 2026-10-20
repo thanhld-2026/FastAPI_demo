@@ -13,6 +13,7 @@ from app.core.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from app.core.responses import error_responses
 from app.dependencies import AdminUser, CurrentUser, DbSession, Pagination, verify_admin_role
 from app.models import UserRole
 from app.schemas.common import Page
@@ -29,6 +30,7 @@ router = APIRouter(prefix="/api/users", tags=["Users"])
     response_model=UserOut,
     status_code=status.HTTP_201_CREATED,
     summary="Đăng ký tài khoản",
+    responses=error_responses(409),
 )
 def register(data: UserCreate, db: DbSession):
     if crud.user.get_by_username(db, data.username):
@@ -44,7 +46,12 @@ def register(data: UserCreate, db: DbSession):
         raise ConflictException(messages.USERNAME_OR_EMAIL_TAKEN) from None
 
 
-@router.post("/login", response_model=Token, summary="Đăng nhập (trả về access_token)")
+@router.post(
+    "/login",
+    response_model=Token,
+    summary="Đăng nhập (trả về access_token)",
+    responses=error_responses(401, 403),
+)
 def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbSession):
     """Chuẩn OAuth2 Password Flow: gửi **form data** `username` + `password`
     (field `username` chấp nhận cả username hoặc email)."""
@@ -56,20 +63,40 @@ def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbSession):
     return Token(access_token=create_access_token(user.id))
 
 
-@router.get("/me", response_model=UserOut, summary="Thông tin user đang đăng nhập")
+@router.get(
+    "/me",
+    response_model=UserOut,
+    summary="Thông tin user đang đăng nhập",
+    responses=error_responses(401, 403),
+)
 def read_me(current_user: CurrentUser):
     return current_user
 
 
-@router.put("/me", response_model=UserOut, summary="Cập nhật thông tin cá nhân")
+@router.put(
+    "/me",
+    response_model=UserOut,
+    summary="Cập nhật thông tin cá nhân",
+    responses=error_responses(401, 403, 409),
+)
 def update_me(data: UserUpdate, current_user: CurrentUser, db: DbSession):
     email_changed = data.email and data.email.lower() != current_user.email
     if email_changed and crud.user.get_by_email(db, data.email):
         raise ConflictException(messages.EMAIL_TAKEN)
-    return crud.user.update(db, current_user, data)
+    try:
+        return crud.user.update(db, current_user, data)
+    except IntegrityError:
+        # 2 request đổi sang cùng 1 email gần như đồng thời -> UNIQUE trong DB chặn request sau
+        db.rollback()
+        raise ConflictException(messages.EMAIL_TAKEN) from None
 
 
-@router.get("/me/bookmarks", response_model=Page[TaskOut], summary="Các task tôi đã bookmark")
+@router.get(
+    "/me/bookmarks",
+    response_model=Page[TaskOut],
+    summary="Các task tôi đã bookmark",
+    responses=error_responses(401, 403),
+)
 def my_bookmarks(current_user: CurrentUser, db: DbSession, pagination: Pagination):
     items, total = crud.task.list_bookmarked(
         db, current_user.id, skip=pagination.skip, limit=pagination.limit
@@ -83,23 +110,36 @@ def my_bookmarks(current_user: CurrentUser, db: DbSession, pagination: Paginatio
     # Không cần dùng giá trị trả về của dependency -> khai báo ở `dependencies=[...]`
     dependencies=[Depends(verify_admin_role)],
     summary="[Admin] Danh sách user",
+    responses=error_responses(401, 403),
 )
 def list_users(db: DbSession, pagination: Pagination):
     items, total = crud.user.list_users(db, skip=pagination.skip, limit=pagination.limit)
     return Page.build(items, total, pagination)
 
 
-@router.patch("/{user_id}", response_model=UserOut, summary="[Admin] Đổi role / khóa tài khoản")
+@router.patch(
+    "/{user_id}",
+    response_model=UserOut,
+    summary="[Admin] Đổi role / khóa tài khoản",
+    responses=error_responses(400, 401, 403, 404),
+)
 def admin_update_user(user_id: int, data: AdminUserUpdate, admin: AdminUser, db: DbSession):
     user = crud.user.get_by_id(db, user_id)
     if user is None:
         raise NotFoundException(messages.USER_NOT_FOUND)
-    if user.id == admin.id and (data.role == UserRole.MEMBER or data.is_active is False):
+    # So với ADMIN thay vì MEMBER: sau này thêm role mới thì vẫn chặn được việc tự hạ quyền
+    demote_or_deactivate = data.role not in (None, UserRole.ADMIN) or data.is_active is False
+    if user.id == admin.id and demote_or_deactivate:
         raise BadRequestException(messages.ADMIN_CANNOT_DEMOTE_SELF)
     return crud.user.admin_update(db, user, data)
 
 
-@router.get("/{username}/profile", response_model=UserProfile, summary="Trang cá nhân công khai")
+@router.get(
+    "/{username}/profile",
+    response_model=UserProfile,
+    summary="Trang cá nhân công khai",
+    responses=error_responses(404),
+)
 def get_profile(username: str, db: DbSession):
     user = crud.user.get_profile(db, username)
     if user is None:

@@ -30,3 +30,4 @@ TAG_IDS_NOT_FOUND = "Tag ids not found: {ids}"
 # --- Validate input (schema) ---
 FIELD_CANNOT_BE_NULL = "{field} cannot be null"
 PASSWORD_TOO_LONG = "Password is too long (max {max_bytes} bytes)"
+DUE_DATE_IN_PAST = "due_date cannot be in the past"

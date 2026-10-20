@@ -5,6 +5,7 @@ from fastapi import APIRouter, Query, status
 from app import crud
 from app.core import messages
 from app.core.exceptions import NotFoundException
+from app.core.responses import error_responses
 from app.dependencies import (
     CurrentUser,
     DbSession,
@@ -32,13 +33,17 @@ def list_projects(db: DbSession, pagination: Pagination):
     response_model=ProjectOut,
     status_code=status.HTTP_201_CREATED,
     summary="Tạo project (người tạo trở thành PM)",
+    responses=error_responses(401, 403),
 )
 def create_project(data: ProjectCreate, current_user: CurrentUser, db: DbSession):
     return crud.project.create(db, data, owner=current_user)
 
 
 @router.get(
-    "/{project_id}", response_model=ProjectDetail, summary="Chi tiết project (kèm danh sách task)"
+    "/{project_id}",
+    response_model=ProjectDetail,
+    summary="Chi tiết project (kèm danh sách task)",
+    responses=error_responses(404),
 )
 def get_project(project_id: int, db: DbSession):
     project = crud.project.get_detail(db, project_id)
@@ -47,13 +52,21 @@ def get_project(project_id: int, db: DbSession):
     return project
 
 
-@router.put("/{project_id}", response_model=ProjectOut, summary="[PM/Admin] Cập nhật project")
+@router.put(
+    "/{project_id}",
+    response_model=ProjectOut,
+    summary="[PM/Admin] Cập nhật project",
+    responses=error_responses(401, 403, 404),
+)
 def update_project(data: ProjectUpdate, project: ManagedProject, db: DbSession):
     return crud.project.update(db, project, data)
 
 
 @router.delete(
-    "/{project_id}", status_code=status.HTTP_204_NO_CONTENT, summary="[PM/Admin] Xóa project"
+    "/{project_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="[PM/Admin] Xóa project",
+    responses=error_responses(401, 403, 404),
 )
 def delete_project(project: ManagedProject, db: DbSession):
     crud.project.delete(db, project)
@@ -63,6 +76,7 @@ def delete_project(project: ManagedProject, db: DbSession):
     "/{project_id}/tasks",
     response_model=Page[TaskOut],
     summary="Danh sách task của project (lọc + phân trang)",
+    responses=error_responses(404),
 )
 def list_project_tasks(
     project: ProjectDep,
@@ -88,6 +102,7 @@ def list_project_tasks(
     response_model=TaskOut,
     status_code=status.HTTP_201_CREATED,
     summary="Tạo task trong project",
+    responses=error_responses(400, 401, 403, 404),
 )
 def create_project_task(
     data: TaskCreate, project: ProjectDep, current_user: CurrentUser, db: DbSession

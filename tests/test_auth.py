@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from sqlalchemy import update
 
+from app import crud
 from app.models import User
 from app.security import create_access_token
 from tests.conftest import DEFAULT_PASSWORD
@@ -180,6 +181,38 @@ def test_admin_cannot_demote_themselves(client, make_user):
 
     resp = client.patch(
         f"/api/users/{admin['id']}", json={"role": "member"}, headers=admin["headers"]
+    )
+
+    assert resp.status_code == 400
+
+
+def test_update_me_email_race_condition_returns_409(client, make_user, monkeypatch):
+    """2 request đổi sang cùng 1 email đồng thời: cả 2 đều qua bước check trước,
+    UNIQUE constraint trong DB phải chặn request sau -> 409 chứ không phải 500."""
+    make_user("alice")
+    bob = make_user("bob")
+    # Giả lập request còn lại chưa kịp commit lúc bob check email
+    monkeypatch.setattr(crud.user, "get_by_email", lambda db, email: None)
+
+    resp = client.put("/api/users/me", json={"email": "alice@example.com"}, headers=bob["headers"])
+
+    assert resp.status_code == 409
+
+
+def test_admin_update_rejects_null_values(client, make_user):
+    admin = make_user("boss", admin=True)
+    bob = make_user("bob")
+    url = f"/api/users/{bob['id']}"
+
+    assert client.patch(url, json={"role": None}, headers=admin["headers"]).status_code == 422
+    assert client.patch(url, json={"is_active": None}, headers=admin["headers"]).status_code == 422
+
+
+def test_admin_cannot_deactivate_themselves(client, make_user):
+    admin = make_user("boss", admin=True)
+
+    resp = client.patch(
+        f"/api/users/{admin['id']}", json={"is_active": False}, headers=admin["headers"]
     )
 
     assert resp.status_code == 400
