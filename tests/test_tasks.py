@@ -87,6 +87,11 @@ def test_pagination_params_are_validated(client):
     assert client.get("/api/tasks", params={"skip": -1}).status_code == 422
 
 
+def test_filter_ids_must_be_positive(client):
+    assert client.get("/api/tasks", params={"project_id": 0}).status_code == 422
+    assert client.get("/api/tasks", params={"assignee_id": -1}).status_code == 422
+
+
 def test_bookmark_requires_login(client, make_user, make_project, make_task):
     pm = make_user("pmuser")
     task = make_task(make_project(pm)["id"], pm)
@@ -110,9 +115,10 @@ def test_bookmark_and_unbookmark(client, make_user, make_project, make_task):
 
     assert first.json() == {"task_id": task["id"], "bookmarked": True}
     assert again.status_code == 200
-    assert [t["title"] for t in bookmarks] == ["Interesting task"]
+    assert bookmarks["total"] == 1
+    assert [t["title"] for t in bookmarks["items"]] == ["Interesting task"]
     assert removed.json()["bookmarked"] is False
-    assert after == []
+    assert (after["total"], after["items"]) == (0, [])
     assert client.post("/api/tasks/999/bookmark", headers=reader["headers"]).status_code == 404
 
 

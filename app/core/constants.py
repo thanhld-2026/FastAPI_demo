@@ -22,3 +22,7 @@ TASK_SEARCH_MAX_LENGTH = 100
 
 # --- Tag ---
 TAG_NAME_MAX_LENGTH = 30
+
+# --- Pagination ---
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100

@@ -5,7 +5,14 @@ from fastapi import APIRouter, Query, status
 from app import crud
 from app.core import messages
 from app.core.exceptions import NotFoundException
-from app.dependencies import CurrentUser, DbSession, ManagedProject, ProjectDep, get_tags_by_ids
+from app.dependencies import (
+    CurrentUser,
+    DbSession,
+    ManagedProject,
+    Pagination,
+    ProjectDep,
+    get_tags_by_ids,
+)
 from app.models import TaskPriority, TaskStatus
 from app.schemas.common import Page
 from app.schemas.project import ProjectCreate, ProjectDetail, ProjectOut, ProjectUpdate
@@ -15,13 +22,9 @@ router = APIRouter(prefix="/api/projects", tags=["Projects"])
 
 
 @router.get("", response_model=Page[ProjectOut], summary="Danh sách project")
-def list_projects(
-    db: DbSession,
-    skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-):
-    items, total = crud.project.list_projects(db, skip=skip, limit=limit)
-    return {"items": items, "total": total, "skip": skip, "limit": limit}
+def list_projects(db: DbSession, pagination: Pagination):
+    items, total = crud.project.list_projects(db, skip=pagination.skip, limit=pagination.limit)
+    return Page.build(items, total, pagination)
 
 
 @router.post(
@@ -64,16 +67,20 @@ def delete_project(project: ManagedProject, db: DbSession):
 def list_project_tasks(
     project: ProjectDep,
     db: DbSession,
+    pagination: Pagination,
     # alias="status": trên URL vẫn là ?status=..., đặt tên biến khác để không đè module `status`
     task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
     priority: TaskPriority | None = None,
-    skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ):
     items, total = crud.task.list_tasks(
-        db, project_id=project.id, status=task_status, priority=priority, skip=skip, limit=limit
+        db,
+        project_id=project.id,
+        status=task_status,
+        priority=priority,
+        skip=pagination.skip,
+        limit=pagination.limit,
     )
-    return {"items": items, "total": total, "skip": skip, "limit": limit}
+    return Page.build(items, total, pagination)
 
 
 @router.post(

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Annotated
 
-from pydantic import AfterValidator, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, model_validator
 
 from app.core.constants import TASK_TITLE_MAX_LENGTH
 from app.models.enums import TaskPriority, TaskStatus
@@ -69,6 +69,6 @@ class TaskOut(ORMSchema):
     updated_at: datetime
 
 
-class BookmarkOut(ORMSchema):
+class BookmarkOut(BaseModel):
     task_id: int
     bookmarked: bool

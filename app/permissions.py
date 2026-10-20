@@ -16,7 +16,7 @@ def is_admin(user: User) -> bool:
 
 
 def can_manage_project(user: User, project: Project) -> bool:
-    """Admin hoặc PM của project: sửa/xóa project, assign task."""
+    """Admin hoặc PM của project: sửa/xóa project, assign task (API assign sẽ làm ở mục 6)."""
     return is_admin(user) or project.owner_id == user.id
 
 

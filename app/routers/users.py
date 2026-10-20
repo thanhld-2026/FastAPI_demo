@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.exc import IntegrityError
 
@@ -13,7 +13,7 @@ from app.core.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
-from app.dependencies import AdminUser, CurrentUser, DbSession, verify_admin_role
+from app.dependencies import AdminUser, CurrentUser, DbSession, Pagination, verify_admin_role
 from app.models import UserRole
 from app.schemas.common import Page
 from app.schemas.profile import UserProfile
@@ -69,9 +69,12 @@ def update_me(data: UserUpdate, current_user: CurrentUser, db: DbSession):
     return crud.user.update(db, current_user, data)
 
 
-@router.get("/me/bookmarks", response_model=list[TaskOut], summary="Các task tôi đã bookmark")
-def my_bookmarks(current_user: CurrentUser, db: DbSession):
-    return crud.task.list_bookmarked(db, current_user.id)
+@router.get("/me/bookmarks", response_model=Page[TaskOut], summary="Các task tôi đã bookmark")
+def my_bookmarks(current_user: CurrentUser, db: DbSession, pagination: Pagination):
+    items, total = crud.task.list_bookmarked(
+        db, current_user.id, skip=pagination.skip, limit=pagination.limit
+    )
+    return Page.build(items, total, pagination)
 
 
 @router.get(
@@ -81,13 +84,9 @@ def my_bookmarks(current_user: CurrentUser, db: DbSession):
     dependencies=[Depends(verify_admin_role)],
     summary="[Admin] Danh sách user",
 )
-def list_users(
-    db: DbSession,
-    skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-):
-    items, total = crud.user.list_users(db, skip=skip, limit=limit)
-    return {"items": items, "total": total, "skip": skip, "limit": limit}
+def list_users(db: DbSession, pagination: Pagination):
+    items, total = crud.user.list_users(db, skip=pagination.skip, limit=pagination.limit)
+    return Page.build(items, total, pagination)
 
 
 @router.patch("/{user_id}", response_model=UserOut, summary="[Admin] Đổi role / khóa tài khoản")

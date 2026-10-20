@@ -123,12 +123,19 @@ def remove_bookmark(db: Session, *, user_id: int, task_id: int) -> None:
     db.commit()
 
 
-def list_bookmarked(db: Session, user_id: int) -> list[Task]:
+def list_bookmarked(
+    db: Session, user_id: int, *, skip: int, limit: int
+) -> tuple[list[Task], int]:
+    total = db.scalar(
+        select(func.count()).select_from(task_bookmarks).where(task_bookmarks.c.user_id == user_id)
+    )
     stmt = (
         select(Task)
         .join(task_bookmarks, task_bookmarks.c.task_id == Task.id)
         .where(task_bookmarks.c.user_id == user_id)
         .options(*TASK_LOAD_OPTIONS)
         .order_by(task_bookmarks.c.created_at.desc(), Task.id.desc())
+        .offset(skip)
+        .limit(limit)
     )
-    return list(db.scalars(stmt).all())
+    return list(db.scalars(stmt).all()), total

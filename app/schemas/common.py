@@ -1,4 +1,6 @@
-from typing import Generic, TypeVar
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, Generic, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -24,6 +26,14 @@ class ORMSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+@dataclass(frozen=True)
+class PageParams:
+    """Tham số phân trang đã validate (do dependency `Pagination` tạo ra)."""
+
+    skip: int
+    limit: int
+
+
 class Page(BaseModel, Generic[T]):
     """Response phân trang dùng chung: Page[TaskOut], Page[ProjectOut], ..."""
 
@@ -31,6 +41,11 @@ class Page(BaseModel, Generic[T]):
     total: int
     skip: int
     limit: int
+
+    @classmethod
+    def build(cls, items: Sequence[Any], total: int, params: PageParams) -> Self:
+        # items có thể là SQLAlchemy object, response_model (vd Page[TaskOut]) lọc field khi trả về
+        return cls(items=list(items), total=total, skip=params.skip, limit=params.limit)
 
 
 def reject_null_fields(schema: BaseModel, *fields: str) -> None:
