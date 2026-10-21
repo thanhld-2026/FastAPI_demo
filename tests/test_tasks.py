@@ -139,6 +139,33 @@ def test_paginate_project_tasks(client, make_user, make_project, make_task):
 def test_pagination_params_are_validated(client):
     assert client.get("/api/v1/tasks", params={"limit": 101}).status_code == 422
     assert client.get("/api/v1/tasks", params={"page": 0}).status_code == 422
+    # page quá lớn: trước đây offset tràn kiểu số nguyên của DB -> 500
+    assert client.get("/api/v1/tasks", params={"page": 10_001}).status_code == 422
+    assert client.get("/api/v1/tasks", params={"page": 10**17}).status_code == 422
+
+
+def test_old_skip_param_is_rejected(client):
+    resp = client.get("/api/v1/tasks", params={"skip": 20, "limit": 20})
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"] == ["query", "skip"]
+    assert "use page" in resp.json()["detail"][0]["msg"]
+
+
+def test_empty_and_out_of_range_pages(client, make_user, make_project, make_task):
+    empty = client.get("/api/v1/tasks").json()
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    for i in range(3):
+        make_task(project["id"], pm, title=f"T{i}")
+
+    last = client.get("/api/v1/tasks", params={"page": 2, "limit": 2}).json()
+    beyond = client.get("/api/v1/tasks", params={"page": 5, "limit": 2})
+
+    assert (empty["total"], empty["page"], empty["pages"]) == (0, 1, 1)  # không phải "1/0"
+    assert (len(last["items"]), last["pages"]) == (1, 2)
+    assert beyond.status_code == 200
+    assert (beyond.json()["items"], beyond.json()["pages"]) == ([], 2)
 
 
 def test_filter_ids_must_be_positive(client):

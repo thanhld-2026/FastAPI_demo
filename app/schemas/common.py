@@ -1,4 +1,3 @@
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Self
@@ -39,7 +38,11 @@ class PageParams:
 
 
 class Page[T](BaseModel):
-    """Response phân trang dùng chung: Page[TaskOut], Page[ProjectOut], ..."""
+    """Response phân trang dùng chung: Page[TaskOut], Page[ProjectOut], ...
+
+    - Không có dữ liệu: `pages` = 1 (trang 1 rỗng), FE không phải hiển thị "trang 1/0".
+    - `page` lớn hơn `pages`: trả 200 với `items` rỗng (không coi là lỗi), FE dựa vào `pages`.
+    """
 
     items: list[T]
     total: int
@@ -55,7 +58,8 @@ class Page[T](BaseModel):
             total=total,
             page=params.page,
             limit=params.limit,
-            pages=math.ceil(total / params.limit),
+            # Chia làm tròn lên bằng số nguyên (không qua float)
+            pages=max(1, (total + params.limit - 1) // params.limit),
         )
 
 

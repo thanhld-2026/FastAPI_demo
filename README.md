@@ -126,8 +126,9 @@ Quy ước:
 - Các API **đọc** (GET) công khai, các API **ghi** đều cần đăng nhập. PM là người tạo project.
   Khi làm RBAC theo workspace (phụ lục đặc tả), quyền đọc sẽ theo membership và cần đăng nhập.
 - Mọi API nằm dưới prefix `/api/v1`.
-- Danh sách phân trang bằng `page` (từ 1) + `limit` (mặc định 20, tối đa 100),
-  response có `total` và `pages` (tổng số trang).
+- Danh sách phân trang bằng `page` (1 tới 10 000) + `limit` (mặc định 20, tối đa 100),
+  response có `total` và `pages` (tổng số trang, tối thiểu 1). `page` vượt quá `pages` trả
+  `items` rỗng. Tham số cũ `skip` bị từ chối (422) để client cũ không âm thầm nhận mãi trang 1.
 - Task: status `TODO` / `IN_PROGRESS` / `IN_REVIEW` / `DONE`, priority `LOW` / `MEDIUM` / `HIGH` / `URGENT`.
 - Project: `ACTIVE` / `ARCHIVED`. Project đã archive thì task và comment bên trong chỉ đọc được
   (mọi thao tác ghi trả `409`), PM / Admin unarchive để mở lại.

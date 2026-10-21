@@ -17,12 +17,13 @@ from typing import Annotated
 
 import jwt
 from fastapi import Depends, Query
+from fastapi.exceptions import RequestValidationError
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app import crud, permissions
 from app.core import messages
-from app.core.constants import API_V1_PREFIX, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from app.core.constants import API_V1_PREFIX, DEFAULT_PAGE_SIZE, MAX_PAGE, MAX_PAGE_SIZE
 from app.core.exceptions import (
     BadRequestException,
     ConflictException,
@@ -237,11 +238,25 @@ ModifiableComment = Annotated[Comment, Depends(verify_comment_modifier)]
 
 # ---------- Phân trang ----------
 def get_pagination(
-    page: Annotated[int, Query(ge=1, description="Số trang, bắt đầu từ 1")] = 1,
+    page: Annotated[int, Query(ge=1, le=MAX_PAGE, description="Số trang, bắt đầu từ 1")] = 1,
     limit: Annotated[
         int, Query(ge=1, le=MAX_PAGE_SIZE, description="Số bản ghi tối đa của 1 trang")
     ] = DEFAULT_PAGE_SIZE,
+    skip: Annotated[str | None, Query(include_in_schema=False)] = None,
 ) -> PageParams:
+    if skip is not None:
+        # Tham số cũ (trước /api/v1): FastAPI mặc định bỏ qua query param lạ -> client cũ gửi
+        # ?skip=20 sẽ luôn nhận trang 1 (vòng lặp phân trang chạy mãi). Báo lỗi 422 rõ ràng.
+        raise RequestValidationError(
+            [
+                {
+                    "type": "extra_forbidden",
+                    "loc": ("query", "skip"),
+                    "msg": messages.SKIP_PARAM_REMOVED,
+                    "input": skip,
+                }
+            ]
+        )
     return PageParams(page=page, limit=limit)
 
 

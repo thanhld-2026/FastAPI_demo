@@ -41,3 +41,6 @@ REQUEST_ID_PATTERN = r"[A-Za-z0-9._-]{1,64}"
 # --- Pagination ---
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
+# Chặn page quá lớn: offset = (page - 1) * limit vượt kiểu số nguyên của DB -> 500,
+# và OFFSET rất lớn bắt DB duyệt qua hàng triệu dòng chỉ để bỏ đi
+MAX_PAGE = 10_000

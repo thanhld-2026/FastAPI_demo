@@ -41,6 +41,7 @@ TAG_IDS_NOT_FOUND = "Tag ids not found: {ids}"
 
 # --- Validate input (schema) ---
 FIELD_CANNOT_BE_NULL = "{field} cannot be null"
+SKIP_PARAM_REMOVED = "skip is no longer supported, use page instead (page = skip / limit + 1)"
 PASSWORD_TOO_LONG = "Password is too long (max {max_bytes} bytes)"
 DUE_DATE_IN_PAST = "due_date cannot be in the past"
 TITLE_MUST_BE_SINGLE_LINE = "title must not contain line breaks"
