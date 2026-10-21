@@ -7,6 +7,7 @@ from app.crud import activity as activity_crud
 from app.models import (
     ActivityAction,
     Project,
+    ProjectStatus,
     Tag,
     Task,
     TaskPriority,
@@ -50,6 +51,18 @@ def get_for_update(db: Session, task_id: int) -> Task | None:
         .where(Task.id == task_id)
         .with_for_update()
         .execution_options(populate_existing=True)
+    )
+    return db.scalar(stmt)
+
+
+def lock_project_status(db: Session, task_id: int) -> ProjectStatus | None:
+    """Status của project chứa task, khóa chia sẻ dòng project (giống crud.project.lock_status)
+    trong 1 query JOIN, không cần load cả task. None nếu task không tồn tại."""
+    stmt = (
+        select(Project.status)
+        .join(Task, Task.project_id == Project.id)
+        .where(Task.id == task_id)
+        .with_for_update(read=True, of=Project)
     )
     return db.scalar(stmt)
 

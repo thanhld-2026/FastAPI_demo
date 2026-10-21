@@ -106,6 +106,7 @@ def test_user_profile_contains_projects_and_assigned_tasks(
     dev_profile = client.get("/api/v1/users/dev/profile").json()
 
     assert [p["name"] for p in pm_profile["owned_projects"]] == ["Mobile App"]
+    assert pm_profile["owned_projects"][0]["status"] == "ACTIVE"  # FE biết project đã archive chưa
     assert [t["title"] for t in dev_profile["assigned_tasks"]] == ["Login screen"]
     assert "email" not in dev_profile  # profile công khai không lộ email
     assert client.get("/api/v1/users/ghost/profile").status_code == 404
@@ -156,9 +157,45 @@ def test_unarchive_project_allows_writes_again(client, make_user, make_project):
 
     reopened = client.post(f"{url}/unarchive", headers=pm["headers"])
     created = client.post(f"{url}/tasks", json={"title": "Back to work"}, headers=pm["headers"])
+    renamed = client.put(url, json={"name": "Renamed"}, headers=pm["headers"])
 
     assert reopened.json()["status"] == "ACTIVE"
     assert created.status_code == 201
+    assert renamed.status_code == 200
+
+
+def test_archived_project_itself_cannot_be_changed_or_deleted(
+    client, make_user, make_project, make_task
+):
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    task = make_task(project["id"], pm)
+    url = f"/api/v1/projects/{project['id']}"
+    client.post(f"{url}/archive", headers=pm["headers"])
+
+    renamed = client.put(url, json={"name": "Renamed"}, headers=pm["headers"])
+    deleted = client.delete(url, headers=pm["headers"])
+
+    assert renamed.status_code == 409
+    assert deleted.status_code == 409
+    assert client.get(url).json()["name"] == "TaskHub"
+    assert client.get(f"/api/v1/tasks/{task['id']}").status_code == 200  # task không bị xóa theo
+
+
+def test_error_order_on_archived_project(client, make_user, make_project, make_task):
+    """401 (chưa đăng nhập) -> 404 -> 409 (archive) -> 403 (không đủ quyền)."""
+    pm = make_user("pmuser")
+    stranger = make_user("stranger")
+    project = make_project(pm)
+    task = make_task(project["id"], pm)
+    task_url = f"/api/v1/tasks/{task['id']}"
+    client.post(f"/api/v1/projects/{project['id']}/archive", headers=pm["headers"])
+
+    anonymous = client.put(task_url, json={"status": "DONE"})
+    missing = client.put("/api/v1/tasks/999", json={"status": "DONE"}, headers=stranger["headers"])
+    by_stranger = client.put(task_url, json={"status": "DONE"}, headers=stranger["headers"])
+
+    assert (anonymous.status_code, missing.status_code, by_stranger.status_code) == (401, 404, 409)
 
 
 def test_filter_projects_by_status(client, make_user, make_project):

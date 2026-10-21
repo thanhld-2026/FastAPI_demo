@@ -8,8 +8,7 @@ from app.dependencies import (
     ExistingTaskId,
     ModifiableComment,
     Pagination,
-    TaskDep,
-    ensure_project_active,
+    WritableTask,
 )
 from app.schemas.comment import CommentCreate, CommentOut, CommentUpdate
 from app.schemas.common import Page
@@ -38,12 +37,11 @@ def list_comments(task_id: ExistingTaskId, db: DbSession, pagination: Pagination
 )
 def create_comment(
     data: CommentCreate,
-    task: TaskDep,
     current_user: CurrentUser,
+    task: WritableTask,
     db: DbSession,
     background_tasks: BackgroundTasks,
 ):
-    ensure_project_active(task.project)
     return comment_service.create_comment(
         db, task=task, author=current_user, data=data, background_tasks=background_tasks
     )

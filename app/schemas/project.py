@@ -31,6 +31,7 @@ class ProjectUpdate(InputSchema):
 class ProjectBrief(ORMSchema):
     id: int
     name: str
+    status: ProjectStatus  # FE biết project nào đã archive (chỉ đọc)
 
 
 class ProjectOut(ORMSchema):

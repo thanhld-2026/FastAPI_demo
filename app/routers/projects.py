@@ -7,12 +7,13 @@ from app.core import messages
 from app.core.exceptions import NotFoundException
 from app.core.responses import error_responses
 from app.dependencies import (
+    ChangeableProject,
     CurrentUser,
     DbSession,
     ManagedProject,
     Pagination,
     ProjectDep,
-    ensure_project_active,
+    WritableProject,
     get_tags_by_ids,
 )
 from app.models import ProjectStatus, TaskPriority, TaskStatus
@@ -60,20 +61,20 @@ def get_project(project_id: int, db: DbSession):
 @router.put(
     "/{project_id}",
     response_model=ProjectOut,
-    summary="[PM/Admin] Cập nhật project",
-    responses=error_responses(401, 403, 404),
+    summary="[PM/Admin] Cập nhật project (project đã archive -> 409, unarchive trước)",
+    responses=error_responses(401, 403, 404, 409),
 )
-def update_project(data: ProjectUpdate, project: ManagedProject, db: DbSession):
+def update_project(data: ProjectUpdate, project: ChangeableProject, db: DbSession):
     return crud.project.update(db, project, data)
 
 
 @router.delete(
     "/{project_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="[PM/Admin] Xóa project",
-    responses=error_responses(401, 403, 404),
+    summary="[PM/Admin] Xóa project (project đã archive -> 409, unarchive trước)",
+    responses=error_responses(401, 403, 404, 409),
 )
-def delete_project(project: ManagedProject, db: DbSession):
+def delete_project(project: ChangeableProject, db: DbSession):
     crud.project.delete(db, project)
 
 
@@ -130,8 +131,7 @@ def list_project_tasks(
     responses=error_responses(400, 401, 403, 404, 409),
 )
 def create_project_task(
-    data: TaskCreate, project: ProjectDep, current_user: CurrentUser, db: DbSession
+    data: TaskCreate, current_user: CurrentUser, project: WritableProject, db: DbSession
 ):
-    ensure_project_active(project)
     tags = get_tags_by_ids(db, data.tag_ids)
     return crud.task.create(db, project=project, data=data, tags=tags, creator=current_user)
