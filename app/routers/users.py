@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.exc import IntegrityError
 
-from app import crud
+from app import crud, permissions
 from app.core import messages
 from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
 from app.core.responses import error_responses
@@ -65,7 +65,9 @@ def change_password(data: PasswordChange, current_user: CurrentUser, db: DbSessi
     responses=error_responses(401, 403),
 )
 def my_bookmarks(current_user: CurrentUser, db: DbSession, pagination: Pagination):
-    items, total = crud.task.list_bookmarked(db, current_user.id, pagination)
+    items, total = crud.task.list_bookmarked(
+        db, current_user, pagination, include_all=permissions.is_admin(current_user)
+    )
     return Page.build(items, total, pagination)
 
 
@@ -102,11 +104,13 @@ def admin_update_user(user_id: int, data: AdminUserUpdate, admin: AdminUser, db:
 @router.get(
     "/{username}/profile",
     response_model=UserProfile,
-    summary="Trang cá nhân công khai",
-    responses=error_responses(404),
+    summary="Trang cá nhân (chỉ hiện project / task trong workspace chung với người xem)",
+    responses=error_responses(401, 403, 404),
 )
-def get_profile(username: str, db: DbSession):
-    user = crud.user.get_profile(db, username)
-    if user is None:
+def get_profile(username: str, current_user: CurrentUser, db: DbSession):
+    profile = crud.user.get_profile(
+        db, username, viewer=current_user, include_all=permissions.is_admin(current_user)
+    )
+    if profile is None:
         raise NotFoundException(messages.USER_NOT_FOUND)
-    return user
+    return profile

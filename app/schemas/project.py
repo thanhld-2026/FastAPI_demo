@@ -30,16 +30,18 @@ class ProjectUpdate(InputSchema):
 # ---------- Output ----------
 class ProjectBrief(ORMSchema):
     id: int
+    workspace_id: int
     name: str
     status: ProjectStatus  # FE biết project nào đã archive (chỉ đọc)
 
 
 class ProjectOut(ORMSchema):
     id: int
+    workspace_id: int
     name: str
     description: str | None
     status: ProjectStatus
-    owner: UserPublic  # nested model: PM của project
+    creator: UserPublic  # nested model: người tạo project (không mang ý nghĩa phân quyền)
     created_at: datetime
     updated_at: datetime
 

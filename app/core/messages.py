@@ -19,23 +19,28 @@ EMAIL_TAKEN = "Email already registered"
 USERNAME_OR_EMAIL_TAKEN = "Username or email already registered"
 ADMIN_CANNOT_DEMOTE_SELF = "Admins cannot demote or deactivate themselves"
 
+# --- Workspace ---
+WORKSPACE_NOT_FOUND = "Workspace not found"
+WORKSPACE_ROLE_REQUIRED = "This action requires at least the {role} role in the workspace"
+WORKSPACE_HAS_PROJECTS = "Workspace still has projects, delete them first"
+MEMBER_NOT_FOUND = "Member not found"
+ALREADY_MEMBER = "User is already a member of this workspace"
+INVITEE_NOT_FOUND = "No active user with this email"
+OWNER_MEMBERSHIP_LOCKED = "The workspace owner cannot be removed or change role"
+OWNER_ROLE_NOT_ASSIGNABLE = "OWNER role cannot be assigned, a workspace has exactly one owner"
+
 # --- Project ---
 PROJECT_NOT_FOUND = "Project not found"
-PROJECT_MANAGER_REQUIRED = "Only the project manager or an admin can perform this action"
-PROJECT_ARCHIVED = "Project is archived, its tasks and comments are read-only"
+PROJECT_ARCHIVED = "Project is archived, it is read-only together with its tasks and comments"
 
 # --- Task ---
 TASK_NOT_FOUND = "Task not found"
-TASK_EDIT_FORBIDDEN = "Not allowed to edit this task"
-TASK_DELETE_FORBIDDEN = "Not allowed to delete this task"
-TASK_ASSIGN_FORBIDDEN = "Only the project manager or an admin can assign tasks"
-ASSIGNEE_NOT_FOUND = "Assignee not found or inactive"
+TASK_DELETE_FORBIDDEN = "Only the task creator or the workspace owner can delete this task"
+ASSIGNEE_NOT_EDITOR = "Assignee must be an active member with at least the EDITOR role"
 
 # --- Comment ---
 COMMENT_NOT_FOUND = "Comment not found"
-COMMENT_MODIFY_FORBIDDEN = (
-    "Only the comment author, the project manager or an admin can modify this comment"
-)
+COMMENT_MODIFY_FORBIDDEN = "Only the comment author or the workspace owner can modify this comment"
 
 # --- Tag ---
 TAG_NOT_FOUND = "Tag not found"

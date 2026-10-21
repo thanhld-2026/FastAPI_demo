@@ -1,7 +1,10 @@
-from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session, selectinload
+from typing import Any
 
-from app.models import Task, User, UserRole
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session, joinedload
+
+from app.crud.workspace import member_workspace_ids
+from app.models import Project, Task, User, UserRole
 from app.schemas.common import PageParams
 from app.schemas.user import AdminUserUpdate, UserCreate, UserUpdate
 from app.security import DUMMY_HASH, hash_password, verify_password
@@ -77,14 +80,36 @@ def list_users(db: Session, pagination: PageParams) -> tuple[list[User], int]:
     return list(users), total
 
 
-def get_profile(db: Session, username: str) -> User | None:
-    """User kèm project đang quản lý + task được giao, load sẵn trong 3 query cố định."""
-    stmt = (
-        select(User)
-        .where(User.username == username)
-        .options(
-            selectinload(User.owned_projects),
-            selectinload(User.assigned_tasks).joinedload(Task.assignee),
-        )
+def get_profile(
+    db: Session, username: str, *, viewer: User, include_all: bool = False
+) -> dict[str, Any] | None:
+    """Thông tin công khai + project user đã tạo + task user được giao, 3 query cố định.
+
+    Chỉ liệt kê project / task trong workspace mà `viewer` cũng là thành viên: profile không được
+    làm lộ dữ liệu của workspace người xem không có quyền (`include_all` cho admin).
+    """
+    user = get_by_username(db, username)
+    if user is None:
+        return None
+    projects = select(Project).where(Project.creator_id == user.id).order_by(Project.id)
+    tasks = (
+        select(Task)
+        .where(Task.assignee_id == user.id)
+        .options(joinedload(Task.assignee))
+        .order_by(Task.id)
     )
-    return db.scalar(stmt)
+    if not include_all:
+        visible = member_workspace_ids(viewer.id)
+        projects = projects.where(Project.workspace_id.in_(visible))
+        tasks = tasks.join(Project, Project.id == Task.project_id).where(
+            Project.workspace_id.in_(visible)
+        )
+    return {
+        "id": user.id,
+        "username": user.username,
+        "full_name": user.full_name,
+        "bio": user.bio,
+        "created_at": user.created_at,
+        "created_projects": list(db.scalars(projects).all()),
+        "assigned_tasks": list(db.scalars(tasks).all()),
+    }

@@ -27,8 +27,14 @@ def test_register_login_and_create_task_flow(client):
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
-    # 3. Tạo project
-    project = client.post("/api/v1/projects", json={"name": "TaskHub"}, headers=headers)
+    # 3. Tạo workspace (người tạo là OWNER) rồi tạo project trong workspace
+    workspace = client.post("/api/v1/workspaces", json={"name": "Team"}, headers=headers)
+    assert workspace.status_code == 201
+    project = client.post(
+        f"/api/v1/workspaces/{workspace.json()['id']}/projects",
+        json={"name": "TaskHub"},
+        headers=headers,
+    )
     assert project.status_code == 201
     project_id = project.json()["id"]
 
@@ -49,7 +55,7 @@ def test_register_login_and_create_task_flow(client):
     assert task["assignee"] is None
 
     # 5. Đọc lại: task xuất hiện trong danh sách task của project
-    listed = client.get(f"/api/v1/projects/{project_id}/tasks")
+    listed = client.get(f"/api/v1/projects/{project_id}/tasks", headers=headers)
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
     assert listed.json()["items"][0]["id"] == task["id"]
@@ -98,15 +104,19 @@ def test_filter_tasks_by_status_and_priority(client, make_user, make_project, ma
     make_task(project["id"], pm, title="B", status="TODO", priority="LOW")
     make_task(project["id"], pm, title="C", status="DONE", priority="HIGH")
 
-    resp = client.get("/api/v1/tasks", params={"status": "TODO", "priority": "HIGH"})
+    resp = client.get(
+        "/api/v1/tasks", params={"status": "TODO", "priority": "HIGH"}, headers=pm["headers"]
+    )
 
     assert resp.status_code == 200
     assert resp.json()["total"] == 1
     assert [t["title"] for t in resp.json()["items"]] == ["A"]
 
 
-def test_filter_with_invalid_enum_returns_422(client):
-    assert client.get("/api/v1/tasks", params={"status": "UNKNOWN"}).status_code == 422
+def test_filter_with_invalid_enum_returns_422(client, make_user):
+    headers = make_user("alice")["headers"]
+    resp = client.get("/api/v1/tasks", params={"status": "UNKNOWN"}, headers=headers)
+    assert resp.status_code == 422
 
 
 def test_search_tasks_by_title(client, make_user, make_project, make_task):
@@ -115,7 +125,7 @@ def test_search_tasks_by_title(client, make_user, make_project, make_task):
     make_task(project["id"], pm, title="Implement login API")
     make_task(project["id"], pm, title="Design homepage")
 
-    resp = client.get("/api/v1/tasks", params={"q": "LOGIN"})
+    resp = client.get("/api/v1/tasks", params={"q": "LOGIN"}, headers=pm["headers"])
 
     assert [t["title"] for t in resp.json()["items"]] == ["Implement login API"]
 
@@ -126,7 +136,11 @@ def test_paginate_project_tasks(client, make_user, make_project, make_task):
     for i in range(15):
         make_task(project["id"], pm, title=f"Task {i:02d}")
 
-    resp = client.get(f"/api/v1/projects/{project['id']}/tasks", params={"page": 3, "limit": 5})
+    resp = client.get(
+        f"/api/v1/projects/{project['id']}/tasks",
+        params={"page": 3, "limit": 5},
+        headers=pm["headers"],
+    )
 
     body = resp.json()
     assert resp.status_code == 200
@@ -136,16 +150,22 @@ def test_paginate_project_tasks(client, make_user, make_project, make_task):
     assert [t["title"] for t in body["items"]] == [f"Task {i:02d}" for i in range(4, -1, -1)]
 
 
-def test_pagination_params_are_validated(client):
-    assert client.get("/api/v1/tasks", params={"limit": 101}).status_code == 422
-    assert client.get("/api/v1/tasks", params={"page": 0}).status_code == 422
+def test_pagination_params_are_validated(client, make_user):
+    headers = make_user("alice")["headers"]
+
+    def status_of(params: dict) -> int:
+        return client.get("/api/v1/tasks", params=params, headers=headers).status_code
+
+    assert status_of({"limit": 101}) == 422
+    assert status_of({"page": 0}) == 422
     # page quá lớn: trước đây offset tràn kiểu số nguyên của DB -> 500
-    assert client.get("/api/v1/tasks", params={"page": 10_001}).status_code == 422
-    assert client.get("/api/v1/tasks", params={"page": 10**17}).status_code == 422
+    assert status_of({"page": 10_001}) == 422
+    assert status_of({"page": 10**17}) == 422
 
 
-def test_old_skip_param_is_rejected(client):
-    resp = client.get("/api/v1/tasks", params={"skip": 20, "limit": 20})
+def test_old_skip_param_is_rejected(client, make_user):
+    headers = make_user("alice")["headers"]
+    resp = client.get("/api/v1/tasks", params={"skip": 20, "limit": 20}, headers=headers)
 
     assert resp.status_code == 422
     assert resp.json()["detail"][0]["loc"] == ["query", "skip"]
@@ -153,14 +173,15 @@ def test_old_skip_param_is_rejected(client):
 
 
 def test_empty_and_out_of_range_pages(client, make_user, make_project, make_task):
-    empty = client.get("/api/v1/tasks").json()
     pm = make_user("pmuser")
+    headers = pm["headers"]
+    empty = client.get("/api/v1/tasks", headers=headers).json()
     project = make_project(pm)
     for i in range(3):
         make_task(project["id"], pm, title=f"T{i}")
 
-    last = client.get("/api/v1/tasks", params={"page": 2, "limit": 2}).json()
-    beyond = client.get("/api/v1/tasks", params={"page": 5, "limit": 2})
+    last = client.get("/api/v1/tasks", params={"page": 2, "limit": 2}, headers=headers).json()
+    beyond = client.get("/api/v1/tasks", params={"page": 5, "limit": 2}, headers=headers)
 
     assert (empty["total"], empty["page"], empty["pages"]) == (0, 1, 1)  # không phải "1/0"
     assert (len(last["items"]), last["pages"]) == (1, 2)
@@ -168,9 +189,13 @@ def test_empty_and_out_of_range_pages(client, make_user, make_project, make_task
     assert (beyond.json()["items"], beyond.json()["pages"]) == ([], 2)
 
 
-def test_filter_ids_must_be_positive(client):
-    assert client.get("/api/v1/tasks", params={"project_id": 0}).status_code == 422
-    assert client.get("/api/v1/tasks", params={"assignee_id": -1}).status_code == 422
+def test_filter_ids_must_be_positive(client, make_user):
+    headers = make_user("alice")["headers"]
+    assert client.get("/api/v1/tasks", params={"project_id": 0}, headers=headers).status_code == 422
+    assert (
+        client.get("/api/v1/tasks", params={"assignee_id": -1}, headers=headers).status_code
+        == 422
+    )
 
 
 def test_bookmark_requires_login(client, make_user, make_project, make_task):
@@ -182,10 +207,12 @@ def test_bookmark_requires_login(client, make_user, make_project, make_task):
     assert resp.status_code == 401
 
 
-def test_bookmark_and_unbookmark(client, make_user, make_project, make_task):
+def test_bookmark_and_unbookmark(client, make_user, make_project, make_task, add_member):
     pm = make_user("pmuser")
     reader = make_user("reader")
-    task = make_task(make_project(pm)["id"], pm, title="Interesting task")
+    project = make_project(pm)
+    add_member(project, pm, reader, role="VIEWER")  # bookmark là dữ liệu cá nhân, VIEWER cũng được
+    task = make_task(project["id"], pm, title="Interesting task")
     url = f"/api/v1/tasks/{task['id']}/bookmark"
 
     first = client.post(url, headers=reader["headers"])
@@ -203,20 +230,35 @@ def test_bookmark_and_unbookmark(client, make_user, make_project, make_task):
     assert client.post("/api/v1/tasks/999/bookmark", headers=reader["headers"]).status_code == 404
 
 
-def test_task_edit_and_delete_permissions(client, make_user, make_project, make_task):
-    pm = make_user("pmuser")
+def test_task_edit_and_delete_permissions(
+    client, make_user, make_project, make_task, add_member
+):
+    owner = make_user("owner")
     creator = make_user("creator")
+    other_editor = make_user("other")
+    viewer = make_user("viewer")
     stranger = make_user("stranger")
-    task = make_task(make_project(pm)["id"], creator)
+    project = make_project(owner)
+    add_member(project, owner, creator)
+    add_member(project, owner, other_editor)
+    add_member(project, owner, viewer, role="VIEWER")
+    task = make_task(project["id"], creator)
+    second = make_task(project["id"], creator, title="Second")
     url = f"/api/v1/tasks/{task['id']}"
+    body = {"status": "IN_PROGRESS"}
 
-    assert client.put(url, json={"status": "DONE"}, headers=stranger["headers"]).status_code == 403
-    updated = client.put(url, json={"status": "IN_PROGRESS"}, headers=creator["headers"])
+    # Sửa: mọi EDITOR; VIEWER bị cấm; người ngoài không thấy task (404)
+    assert client.put(url, json=body, headers=stranger["headers"]).status_code == 404
+    assert client.put(url, json=body, headers=viewer["headers"]).status_code == 403
+    updated = client.put(url, json=body, headers=other_editor["headers"])
     assert updated.status_code == 200
     assert updated.json()["status"] == "IN_PROGRESS"
 
-    assert client.delete(url, headers=stranger["headers"]).status_code == 403
-    assert client.delete(url, headers=pm["headers"]).status_code == 204
+    # Xóa: EDITOR chỉ xóa task mình tạo, OWNER xóa được mọi task
+    assert client.delete(url, headers=other_editor["headers"]).status_code == 403
+    assert client.delete(url, headers=creator["headers"]).status_code == 204
+    by_owner = client.delete(f"/api/v1/tasks/{second['id']}", headers=owner["headers"])
+    assert by_owner.status_code == 204
 
 
 def test_update_task_rejects_null_for_required_fields(client, make_user, make_project, make_task):
@@ -307,16 +349,19 @@ def test_in_review_status_and_urgent_priority(client, make_user, make_project, m
     make_task(project["id"], pm, title="Review PR", status="IN_REVIEW", priority="URGENT")
     make_task(project["id"], pm, title="Other task")
 
-    resp = client.get("/api/v1/tasks", params={"status": "IN_REVIEW", "priority": "URGENT"})
+    resp = client.get(
+        "/api/v1/tasks", params={"status": "IN_REVIEW", "priority": "URGENT"}, headers=pm["headers"]
+    )
 
     assert [t["title"] for t in resp.json()["items"]] == ["Review PR"]
 
 # ---------- N+1 query ----------
-def _seed_tasks(client, make_user, make_project, make_task, make_tag, count: int) -> None:
+def _seed_tasks(client, make_user, make_project, make_task, make_tag, add_member, count: int):
     pm = make_user(f"pm_{count}")
     dev = make_user(f"dev_{count}")
     tag = make_tag(f"tag-{count}")
     project = make_project(pm)
+    add_member(project, pm, dev)
     for i in range(count):
         task = make_task(project["id"], pm, title=f"T{i}", tag_ids=[tag["id"]])
         client.post(
@@ -327,29 +372,32 @@ def _seed_tasks(client, make_user, make_project, make_task, make_tag, count: int
 
 
 def test_listing_tasks_runs_constant_number_of_queries(
-    client, make_user, make_project, make_task, make_tag, sql_log
+    client, make_user, make_project, make_task, make_tag, add_member, sql_log
 ):
     """Số query KHÔNG tăng theo số task nhờ joinedload / selectinload."""
-    _seed_tasks(client, make_user, make_project, make_task, make_tag, count=2)
+    admin = make_user("boss", admin=True)  # admin thấy task ở mọi workspace
+    seed = (client, make_user, make_project, make_task, make_tag, add_member)
+    _seed_tasks(*seed, count=2)
     sql_log.clear()
-    client.get("/api/v1/tasks")
+    client.get("/api/v1/tasks", headers=admin["headers"])
     queries_for_2_tasks = len(sql_log)
 
-    _seed_tasks(client, make_user, make_project, make_task, make_tag, count=10)
+    _seed_tasks(*seed, count=10)
     sql_log.clear()
-    resp = client.get("/api/v1/tasks")
+    resp = client.get("/api/v1/tasks", headers=admin["headers"])
     queries_for_12_tasks = len(sql_log)
 
     assert resp.json()["total"] == 12
-    # 1 COUNT + 1 SELECT tasks JOIN users + 1 SELECT tags WHERE task_id IN (...)
-    assert queries_for_2_tasks == queries_for_12_tasks == 3
+    # 1 SELECT user (xác thực token) + 1 COUNT + 1 SELECT tasks JOIN users
+    # + 1 SELECT tags WHERE task_id IN (...)
+    assert queries_for_2_tasks == queries_for_12_tasks == 4
 
 
 def test_lazy_loading_causes_n_plus_one(
-    client, db, make_user, make_project, make_task, make_tag, sql_log
+    client, db, make_user, make_project, make_task, make_tag, add_member, sql_log
 ):
     """Minh họa vấn đề: KHÔNG eager load thì mỗi task sinh thêm query riêng."""
-    _seed_tasks(client, make_user, make_project, make_task, make_tag, count=5)
+    _seed_tasks(client, make_user, make_project, make_task, make_tag, add_member, count=5)
     sql_log.clear()
 
     tasks = db.scalars(select(Task)).all()  # 1 query

@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, status
 from pydantic import PositiveInt
 
-from app import crud
+from app import crud, permissions
 from app.core.constants import TASK_SEARCH_MAX_LENGTH
 from app.core.responses import error_responses
 from app.dependencies import (
@@ -12,9 +12,9 @@ from app.dependencies import (
     DbSession,
     DeletableTask,
     EditableTask,
-    ExistingTaskId,
     Pagination,
-    TaskDep,
+    ReadableTask,
+    ReadableTaskId,
     get_tags_by_ids,
 )
 from app.models import TaskPriority, TaskStatus
@@ -25,8 +25,14 @@ from app.services import tasks as task_service
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
 
-@router.get("", response_model=Page[TaskOut], summary="Tìm kiếm / lọc / phân trang task")
+@router.get(
+    "",
+    response_model=Page[TaskOut],
+    summary="Tìm kiếm / lọc / phân trang task (trong các workspace tôi là thành viên)",
+    responses=error_responses(401, 403),
+)
 def list_tasks(
+    current_user: CurrentUser,
     db: DbSession,
     pagination: Pagination,
     task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
@@ -40,6 +46,8 @@ def list_tasks(
 ):
     items, total = crud.task.list_tasks(
         db,
+        viewer=current_user,
+        include_all=permissions.is_admin(current_user),
         status=task_status,
         priority=priority,
         project_id=project_id,
@@ -51,16 +59,19 @@ def list_tasks(
 
 
 @router.get(
-    "/{task_id}", response_model=TaskOut, summary="Chi tiết task", responses=error_responses(404)
+    "/{task_id}",
+    response_model=TaskOut,
+    summary="Chi tiết task",
+    responses=error_responses(401, 403, 404),
 )
-def get_task(task: TaskDep):
+def get_task(task: ReadableTask):
     return task
 
 
 @router.put(
     "/{task_id}",
     response_model=TaskOut,
-    summary="Cập nhật task (người tạo / người được assign / PM / Admin)",
+    summary="[EDITOR] Cập nhật task",
     responses=error_responses(400, 401, 403, 404, 409),
 )
 def update_task(data: TaskUpdate, task: EditableTask, current_user: CurrentUser, db: DbSession):
@@ -71,7 +82,7 @@ def update_task(data: TaskUpdate, task: EditableTask, current_user: CurrentUser,
 @router.delete(
     "/{task_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Xóa task (người tạo / PM / Admin)",
+    summary="[EDITOR] Xóa task mình tạo, OWNER xóa được mọi task",
     responses=error_responses(401, 403, 404, 409),
 )
 def delete_task(task: DeletableTask, db: DbSession):
@@ -81,7 +92,7 @@ def delete_task(task: DeletableTask, db: DbSession):
 @router.post(
     "/{task_id}/assign",
     response_model=TaskOut,
-    summary="[PM/Admin] Giao task cho user",
+    summary="[EDITOR] Giao task cho thành viên (role EDITOR trở lên)",
     responses=error_responses(400, 401, 403, 404, 409),
 )
 def assign_task(data: TaskAssign, task: AssignableTask, current_user: CurrentUser, db: DbSession):
@@ -93,10 +104,10 @@ def assign_task(data: TaskAssign, task: AssignableTask, current_user: CurrentUse
 @router.post(
     "/{task_id}/bookmark",
     response_model=BookmarkOut,
-    summary="Bookmark task (cần đăng nhập)",
+    summary="Bookmark task (thành viên workspace)",
     responses=error_responses(401, 403, 404),
 )
-def bookmark_task(task_id: ExistingTaskId, current_user: CurrentUser, db: DbSession):
+def bookmark_task(task_id: ReadableTaskId, current_user: CurrentUser, db: DbSession):
     crud.task.add_bookmark(db, user_id=current_user.id, task_id=task_id)
     return BookmarkOut(task_id=task_id, bookmarked=True)
 
@@ -107,7 +118,7 @@ def bookmark_task(task_id: ExistingTaskId, current_user: CurrentUser, db: DbSess
     summary="Bỏ bookmark task (idempotent)",
     responses=error_responses(401, 403, 404),
 )
-def unbookmark_task(task_id: ExistingTaskId, current_user: CurrentUser, db: DbSession):
+def unbookmark_task(task_id: ReadableTaskId, current_user: CurrentUser, db: DbSession):
     """Cố ý idempotent, giống POST /bookmark: gọi lại nhiều lần hoặc task chưa từng được
     bookmark vẫn trả 200 `bookmarked: false`, vì trạng thái cuối cùng là như nhau."""
     crud.task.remove_bookmark(db, user_id=current_user.id, task_id=task_id)
@@ -118,8 +129,8 @@ def unbookmark_task(task_id: ExistingTaskId, current_user: CurrentUser, db: DbSe
     "/{task_id}/activities",
     response_model=Page[ActivityOut],
     summary="Lịch sử hoạt động của task",
-    responses=error_responses(404),
+    responses=error_responses(401, 403, 404),
 )
-def list_activities(task_id: ExistingTaskId, db: DbSession, pagination: Pagination):
+def list_activities(task_id: ReadableTaskId, db: DbSession, pagination: Pagination):
     items, total = crud.activity.list_for_task(db, task_id, pagination)
     return Page.build(items, total, pagination)

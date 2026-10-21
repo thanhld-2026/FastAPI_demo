@@ -24,12 +24,15 @@ def sent_emails(monkeypatch) -> list[dict]:
 
 
 def test_comment_notifies_task_creator_and_assignee(
-    client, make_user, make_project, make_task, sent_emails
+    client, make_user, make_project, make_task, add_member, sent_emails
 ):
     pm = make_user("pmuser")
     creator = make_user("creator")
     dev = make_user("dev")
-    task = make_task(make_project(pm)["id"], creator, title="Payment API")
+    project = make_project(pm)
+    add_member(project, pm, creator)
+    add_member(project, pm, dev)
+    task = make_task(project["id"], creator, title="Payment API")
     client.post(
         f"/api/v1/tasks/{task['id']}/assign", json={"assignee_id": dev["id"]}, headers=pm["headers"]
     )

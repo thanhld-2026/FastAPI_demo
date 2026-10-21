@@ -1,7 +1,8 @@
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.models import Project, ProjectStatus, Task, User
+from app.crud.workspace import member_workspace_ids
+from app.models import Project, ProjectStatus, Task, User, Workspace
 from app.schemas.common import PageParams
 from app.schemas.project import ProjectCreate, ProjectUpdate
 
@@ -29,9 +30,9 @@ def lock_status(db: Session, project_id: int, *, exclusive: bool = False) -> Pro
 
 
 def get_detail(db: Session, project_id: int) -> Project | None:
-    """Project + owner + tasks + assignee của từng task.
+    """Project + creator + tasks + assignee của từng task.
 
-    - joinedload(owner): quan hệ Many-to-One -> JOIN luôn trong câu query chính.
+    - joinedload(creator): quan hệ Many-to-One -> JOIN luôn trong câu query chính.
     - selectinload(tasks): quan hệ One-to-Many -> 1 query phụ `WHERE project_id IN (...)`,
       tránh JOIN làm nhân bản dòng của project.
     - .joinedload(Task.assignee): load lồng tiếp assignee của mỗi task (chained loading).
@@ -41,7 +42,7 @@ def get_detail(db: Session, project_id: int) -> Project | None:
         select(Project)
         .where(Project.id == project_id)
         .options(
-            joinedload(Project.owner),
+            joinedload(Project.creator),
             selectinload(Project.tasks).joinedload(Task.assignee),
         )
     )
@@ -49,14 +50,27 @@ def get_detail(db: Session, project_id: int) -> Project | None:
 
 
 def list_projects(
-    db: Session, pagination: PageParams, status: ProjectStatus | None = None
+    db: Session,
+    pagination: PageParams,
+    *,
+    viewer: User,
+    include_all: bool = False,
+    status: ProjectStatus | None = None,
+    workspace_id: int | None = None,
 ) -> tuple[list[Project], int]:
-    conditions = [Project.status == status] if status is not None else []
+    """Project trong các workspace `viewer` là thành viên (`include_all` cho admin)."""
+    conditions: list[ColumnElement[bool]] = []
+    if not include_all:
+        conditions.append(Project.workspace_id.in_(member_workspace_ids(viewer.id)))
+    if status is not None:
+        conditions.append(Project.status == status)
+    if workspace_id is not None:
+        conditions.append(Project.workspace_id == workspace_id)
     total = db.execute(select(func.count()).select_from(Project).where(*conditions)).scalar_one()
     stmt = (
         select(Project)
         .where(*conditions)
-        .options(joinedload(Project.owner))  # tránh N+1 khi trả về owner của từng project
+        .options(joinedload(Project.creator))  # tránh N+1 khi trả về creator của từng project
         .order_by(Project.id)
         .offset(pagination.offset)
         .limit(pagination.limit)
@@ -64,8 +78,8 @@ def list_projects(
     return list(db.scalars(stmt).all()), total
 
 
-def create(db: Session, data: ProjectCreate, owner: User) -> Project:
-    project = Project(**data.model_dump(), owner=owner)
+def create(db: Session, data: ProjectCreate, *, workspace: Workspace, creator: User) -> Project:
+    project = Project(**data.model_dump(), workspace=workspace, creator=creator)
     db.add(project)
     db.commit()
     db.refresh(project)

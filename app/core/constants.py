@@ -23,6 +23,9 @@ REFRESH_TOKEN_BYTES = 32  # độ dài ngẫu nhiên trước khi encode base64 
 REFRESH_TOKEN_MAX_LENGTH = 128  # giới hạn input client gửi lên
 TOKEN_HASH_LENGTH = 64  # SHA-256 dạng hex
 
+# --- Workspace ---
+WORKSPACE_NAME_MAX_LENGTH = 100
+
 # --- Project ---
 PROJECT_NAME_MAX_LENGTH = 100
 

@@ -14,6 +14,17 @@ class UserRole(StrEnum):
     MEMBER = "member"
 
 
+class WorkspaceRole(StrEnum):
+    """Vai trò của user TRONG 1 workspace (khác UserRole là vai trò toàn hệ thống).
+
+    VIEWER < EDITOR < OWNER: role cao hơn có mọi quyền của role thấp hơn (xem permissions.py).
+    """
+
+    OWNER = "OWNER"  # người tạo workspace: quản lý workspace, member, project
+    EDITOR = "EDITOR"  # làm việc với task / comment
+    VIEWER = "VIEWER"  # chỉ đọc
+
+
 class TaskStatus(StrEnum):
     TODO = "TODO"
     IN_PROGRESS = "IN_PROGRESS"

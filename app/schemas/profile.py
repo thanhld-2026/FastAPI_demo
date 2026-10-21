@@ -13,5 +13,5 @@ class UserProfile(ORMSchema):
     full_name: str | None
     bio: str | None
     created_at: datetime
-    owned_projects: list[ProjectBrief]
+    created_projects: list[ProjectBrief]
     assigned_tasks: list[TaskBrief]
