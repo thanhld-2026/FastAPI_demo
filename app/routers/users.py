@@ -1,66 +1,18 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends
 from sqlalchemy.exc import IntegrityError
 
 from app import crud
 from app.core import messages
-from app.core.exceptions import (
-    BadRequestException,
-    ConflictException,
-    ForbiddenException,
-    NotFoundException,
-    UnauthorizedException,
-)
+from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
 from app.core.responses import error_responses
 from app.dependencies import AdminUser, CurrentUser, DbSession, Pagination, verify_admin_role
 from app.models import UserRole
 from app.schemas.common import Page
 from app.schemas.profile import UserProfile
 from app.schemas.task import TaskOut
-from app.schemas.user import AdminUserUpdate, Token, UserCreate, UserOut, UserUpdate
-from app.security import create_access_token
+from app.schemas.user import AdminUserUpdate, UserOut, UserUpdate
 
 router = APIRouter(prefix="/users", tags=["Users"])
-
-
-@router.post(
-    "/register",
-    response_model=UserOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Đăng ký tài khoản",
-    responses=error_responses(409),
-)
-def register(data: UserCreate, db: DbSession):
-    if crud.user.get_by_username(db, data.username):
-        raise ConflictException(messages.USERNAME_TAKEN)
-    if crud.user.get_by_email(db, data.email):
-        raise ConflictException(messages.EMAIL_TAKEN)
-    try:
-        return crud.user.create(db, data)
-    except IntegrityError:
-        # 2 request đăng ký cùng username gần như đồng thời: cả 2 đều qua bước kiểm tra
-        # ở trên, nhưng UNIQUE constraint trong DB vẫn chặn được request thứ 2.
-        db.rollback()
-        raise ConflictException(messages.USERNAME_OR_EMAIL_TAKEN) from None
-
-
-@router.post(
-    "/login",
-    response_model=Token,
-    summary="Đăng nhập (trả về access_token)",
-    responses=error_responses(401, 403),
-)
-def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbSession):
-    """Chuẩn OAuth2 Password Flow: gửi **form data** `username` + `password`
-    (field `username` chấp nhận cả username hoặc email)."""
-    user = crud.user.authenticate(db, form.username, form.password)
-    if user is None:
-        raise UnauthorizedException(messages.INCORRECT_LOGIN)
-    if not user.is_active:
-        raise ForbiddenException(messages.INACTIVE_USER)
-    return Token(access_token=create_access_token(user.id))
 
 
 @router.get(

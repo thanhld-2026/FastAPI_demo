@@ -8,6 +8,7 @@ INVALID_CREDENTIALS = "Could not validate credentials"
 INCORRECT_LOGIN = "Incorrect username or password"
 INACTIVE_USER = "Inactive user"
 ADMIN_REQUIRED = "Admin privileges required"
+INVALID_REFRESH_TOKEN = "Invalid, expired or revoked refresh token"
 
 # --- User ---
 USER_NOT_FOUND = "User not found"

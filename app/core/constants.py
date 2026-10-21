@@ -18,6 +18,11 @@ BIO_MAX_LENGTH = 1000
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_BYTES = 72  # giới hạn của bcrypt, tính theo BYTES chứ không phải ký tự
 
+# --- Refresh token ---
+REFRESH_TOKEN_BYTES = 32  # độ dài ngẫu nhiên trước khi encode base64 (~43 ký tự)
+REFRESH_TOKEN_MAX_LENGTH = 128  # giới hạn input client gửi lên
+TOKEN_HASH_LENGTH = 64  # SHA-256 dạng hex
+
 # --- Project ---
 PROJECT_NAME_MAX_LENGTH = 100
 

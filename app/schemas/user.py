@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, EmailStr, Field, model_validator
+from pydantic import AfterValidator, EmailStr, Field, model_validator
 
 from app.core import messages
 from app.core.constants import (
@@ -92,7 +92,3 @@ class UserOut(ORMSchema):
     is_active: bool
     created_at: datetime
 
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str = "bearer"

@@ -12,7 +12,7 @@ from tests.conftest import DEFAULT_PASSWORD
 
 def test_register_returns_user_without_password(client):
     resp = client.post(
-        "/api/v1/users/register",
+        "/api/v1/auth/register",
         json={"username": "alice", "email": "Alice@Example.com", "password": DEFAULT_PASSWORD},
     )
 
@@ -28,11 +28,11 @@ def test_register_duplicate_username_or_email_returns_409(client, make_user):
     make_user("alice")
 
     same_username = client.post(
-        "/api/v1/users/register",
+        "/api/v1/auth/register",
         json={"username": "alice", "email": "other@example.com", "password": DEFAULT_PASSWORD},
     )
     same_email = client.post(
-        "/api/v1/users/register",
+        "/api/v1/auth/register",
         json={"username": "alice2", "email": "alice@example.com", "password": DEFAULT_PASSWORD},
     )
 
@@ -42,7 +42,7 @@ def test_register_duplicate_username_or_email_returns_409(client, make_user):
 
 def test_register_rejects_mass_assignment_of_role(client):
     resp = client.post(
-        "/api/v1/users/register",
+        "/api/v1/auth/register",
         json={
             "username": "hacker",
             "email": "hacker@example.com",
@@ -55,7 +55,7 @@ def test_register_rejects_mass_assignment_of_role(client):
 
 def test_register_validates_input(client):
     resp = client.post(
-        "/api/v1/users/register",
+        "/api/v1/auth/register",
         json={"username": "a b", "email": "not-an-email", "password": "short"},
     )
 
@@ -68,10 +68,10 @@ def test_login_with_username_or_email(client, make_user):
     make_user("alice")
 
     by_username = client.post(
-        "/api/v1/users/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
+        "/api/v1/auth/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
     )
     by_email = client.post(
-        "/api/v1/users/login", data={"username": "alice@example.com", "password": DEFAULT_PASSWORD}
+        "/api/v1/auth/login", data={"username": "alice@example.com", "password": DEFAULT_PASSWORD}
     )
 
     assert by_username.status_code == 200
@@ -82,9 +82,9 @@ def test_login_with_username_or_email(client, make_user):
 def test_login_with_wrong_password_returns_401(client, make_user):
     make_user("alice")
 
-    resp = client.post("/api/v1/users/login", data={"username": "alice", "password": "WrongPass1"})
+    resp = client.post("/api/v1/auth/login", data={"username": "alice", "password": "WrongPass1"})
     unknown = client.post(
-        "/api/v1/users/login", data={"username": "nobody", "password": "WrongPass1"}
+        "/api/v1/auth/login", data={"username": "nobody", "password": "WrongPass1"}
     )
 
     assert resp.status_code == 401
@@ -137,10 +137,10 @@ def test_update_me_including_password(client, make_user):
     assert resp.json()["full_name"] == "Alice Nguyen"
     assert resp.json()["bio"] == "Backend dev"
     old_login = client.post(
-        "/api/v1/users/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
+        "/api/v1/auth/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
     )
     new_login = client.post(
-        "/api/v1/users/login", data={"username": "alice", "password": "NewPassword456"}
+        "/api/v1/auth/login", data={"username": "alice", "password": "NewPassword456"}
     )
     assert old_login.status_code == 401
     assert new_login.status_code == 200
@@ -179,7 +179,7 @@ def test_deactivated_user_is_blocked(client, make_user):
     # Token cũ vẫn còn hạn nhưng get_current_active_user chặn lại
     assert client.get("/api/v1/users/me", headers=bob["headers"]).status_code == 403
     login = client.post(
-        "/api/v1/users/login", data={"username": "bob", "password": DEFAULT_PASSWORD}
+        "/api/v1/auth/login", data={"username": "bob", "password": DEFAULT_PASSWORD}
     )
     assert login.status_code == 403
 

@@ -26,7 +26,9 @@ class Settings(BaseSettings):
     # Bắt buộc phải khai báo, không có giá trị mặc định -> tránh vô tình dùng key yếu
     SECRET_KEY: str = Field(min_length=32)
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    # Access token sống ngắn (không thu hồi được), refresh token sống dài (lưu DB, thu hồi được)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     BCRYPT_ROUNDS: int = Field(default=12, ge=4, le=16)
 
     # --- CORS ---

@@ -15,14 +15,14 @@ def test_register_login_and_create_task_flow(client):
     """Đi qua API giống hệt 1 client thật: không chạm trực tiếp vào DB."""
     # 1. Đăng ký
     register = client.post(
-        "/api/v1/users/register",
+        "/api/v1/auth/register",
         json={"username": "alice", "email": "alice@example.com", "password": DEFAULT_PASSWORD},
     )
     assert register.status_code == 201
 
     # 2. Đăng nhập -> nhận access token
     login = client.post(
-        "/api/v1/users/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
+        "/api/v1/auth/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
     )
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}

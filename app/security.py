@@ -1,5 +1,7 @@
-"""Băm mật khẩu (bcrypt) và tạo / giải mã JWT access token (PyJWT)."""
+"""Băm mật khẩu (bcrypt), tạo / giải mã JWT access token (PyJWT) và tạo refresh token."""
 
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -7,6 +9,7 @@ import bcrypt
 import jwt
 
 from app.config import settings
+from app.core.constants import REFRESH_TOKEN_BYTES
 
 
 def hash_password(password: str) -> str:
@@ -47,3 +50,18 @@ def decode_access_token(token: str) -> dict[str, Any]:
         algorithms=[settings.ALGORITHM],
         options={"require": ["exp", "sub"]},
     )
+
+
+def create_refresh_token() -> str:
+    """Refresh token là chuỗi ngẫu nhiên (opaque), không phải JWT: chỉ server hiểu nó qua bảng
+    refresh_tokens, nhờ vậy thu hồi được (logout) - điều access token JWT không làm được."""
+    return secrets.token_urlsafe(REFRESH_TOKEN_BYTES)
+
+
+def hash_token(token: str) -> str:
+    """DB chỉ lưu SHA-256 của refresh token: lộ DB cũng không dùng được token.
+
+    Không cần bcrypt như mật khẩu: token đã là chuỗi ngẫu nhiên 256 bit, không đoán / brute-force
+    được, còn SHA-256 thì tra cứu nhanh (so sánh bằng index).
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

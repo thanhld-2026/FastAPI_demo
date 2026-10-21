@@ -9,6 +9,7 @@ from app.models.associations import task_bookmarks, task_tags
 from app.models.comment import Comment
 from app.models.enums import ActivityAction, ProjectStatus, TaskPriority, TaskStatus, UserRole
 from app.models.project import Project
+from app.models.refresh_token import RefreshToken
 from app.models.tag import Tag
 from app.models.task import Task
 from app.models.user import User
@@ -18,6 +19,7 @@ __all__ = [
     "Comment",
     "Project",
     "ProjectStatus",
+    "RefreshToken",
     "Tag",
     "Task",
     "TaskActivity",
