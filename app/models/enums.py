@@ -1,4 +1,10 @@
-"""Các Enum dùng chung cho model (DB) và schema (API)."""
+"""Các Enum dùng chung cho model (DB) và schema (API).
+
+Enum lưu dạng VARCHAR không có CHECK constraint (xem models/base.py: enum_column), nên thêm
+giá trị mới không cần migration. Lưu ý khi triển khai: đã có dòng mang giá trị mới (vd
+IN_REVIEW) mà rollback app về bản cũ thì bản cũ đọc ra sẽ lỗi (LookupError -> 500).
+Muốn rollback an toàn phải chuyển các dòng đó về giá trị cũ trước.
+"""
 
 from enum import StrEnum
 

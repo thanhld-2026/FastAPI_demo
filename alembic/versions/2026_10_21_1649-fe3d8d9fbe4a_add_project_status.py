@@ -1,8 +1,8 @@
 """add project status
 
-Revision ID: a4e47a4bd5d9
+Revision ID: fe3d8d9fbe4a
 Revises: ee78e6fd31f4
-Create Date: 2026-10-21 03:07:25.311830
+Create Date: 2026-10-21 16:49:21.148425
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'a4e47a4bd5d9'
+revision: str = 'fe3d8d9fbe4a'
 down_revision: Union[str, Sequence[str], None] = 'ee78e6fd31f4'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
