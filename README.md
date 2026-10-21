@@ -64,7 +64,7 @@ Tất cả dùng chung mật khẩu **`Password123`**.
 ## 4. Chạy test
 
 ```bash
-pytest          # 67 test, khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 72 test, khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 ```
 
@@ -86,7 +86,7 @@ pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # inte
 │   ├── schemas/             # Pydantic schema = hình dạng dữ liệu vào/ra API
 │   ├── crud/                # Truy cập DB (query, eager loading, transaction)
 │   ├── routers/             # Endpoint HTTP (APIRouter)
-│   └── services/email.py    # Gửi email (chạy ở background)
+│   └── services/            # Nghiệp vụ assign / comment, gửi email (chạy ở background)
 ├── alembic/                 # Migration database
 ├── scripts/seed.py          # Dữ liệu mẫu
 ├── tests/                   # pytest
@@ -97,13 +97,17 @@ pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # inte
 ### Luồng xử lý một request
 
 ```
-Client ──HTTP──▶ CORS middleware ──▶ Log middleware (request id, thời gian xử lý)
+Client ──HTTP──▶ CORS middleware ──▶ Log middleware (request id, thời gian xử lý,
+                                      bắt lỗi không lường trước -> 500 vẫn có CORS)
                                           │
                                           ▼
                      Router (app/routers)  ◀── Dependencies: get_db, get_current_user,
                      - validate input bằng      verify_project_manager, verify_task_editor,
                        Pydantic schema          Pagination, ... (lỗi -> AppException)
                      - kiểm tra quyền (permissions.py)
+                                          │
+                                          ▼
+                     Service (app/services) - nghiệp vụ nhiều bước (assign, comment + email)
                                           │
                                           ▼
                      CRUD (app/crud) ──SQLAlchemy──▶ PostgreSQL
