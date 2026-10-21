@@ -3,7 +3,9 @@ from sqlalchemy import exists, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.crud import activity as activity_crud
 from app.models import (
+    ActivityAction,
     Project,
     Tag,
     Task,
@@ -12,6 +14,7 @@ from app.models import (
     User,
     task_bookmarks,
 )
+from app.schemas.common import PageParams
 from app.schemas.task import TaskCreate, TaskUpdate
 
 # Eager loading dùng chung cho mọi query trả về TaskOut.
@@ -30,6 +33,21 @@ def get(db: Session, task_id: int) -> Task | None:
     return db.scalar(stmt)
 
 
+def get_for_update(db: Session, task_id: int) -> Task | None:
+    """SELECT ... FOR UPDATE: khóa dòng task tới khi commit/rollback.
+
+    Nếu 2 PM cùng assign 1 task cùng lúc, request thứ 2 phải chờ request 1 xong
+    -> tránh race condition. (SQLite không hỗ trợ, SQLAlchemy tự bỏ qua mệnh đề này.)
+    """
+    stmt = (
+        select(Task)
+        .where(Task.id == task_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return db.scalar(stmt)
+
+
 def exists_by_id(db: Session, task_id: int) -> bool:
     return bool(db.scalar(select(exists().where(Task.id == task_id))))
 
@@ -37,8 +55,7 @@ def exists_by_id(db: Session, task_id: int) -> bool:
 def list_tasks(
     db: Session,
     *,
-    skip: int,
-    limit: int,
+    pagination: PageParams,
     project_id: int | None = None,
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
@@ -65,8 +82,8 @@ def list_tasks(
         .where(*conditions)
         .options(*TASK_LOAD_OPTIONS)
         .order_by(Task.id.desc())
-        .offset(skip)
-        .limit(limit)
+        .offset(pagination.skip)
+        .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total
 
@@ -76,15 +93,30 @@ def create(
 ) -> Task:
     task = Task(**data.model_dump(exclude={"tag_ids"}), project=project, creator=creator, tags=tags)
     db.add(task)
-    db.commit()
+    activity_crud.add(db, task=task, actor=creator, action=ActivityAction.CREATED)
+    db.commit()  # task + activity được lưu trong cùng 1 transaction
     return get(db, task.id)
 
 
-def update(db: Session, task: Task, data: TaskUpdate, *, tags: list[Tag] | None) -> Task:
-    for field, value in data.model_dump(exclude_unset=True, exclude={"tag_ids"}).items():
+def update(
+    db: Session, task: Task, data: TaskUpdate, *, tags: list[Tag] | None, actor: User
+) -> Task:
+    values = data.model_dump(exclude_unset=True, exclude={"tag_ids"})
+    changed = [field for field, value in values.items() if getattr(task, field) != value]
+    for field, value in values.items():
         setattr(task, field, value)
-    if tags is not None:
+    if tags is not None and {t.id for t in task.tags} != {t.id for t in tags}:
         task.tags = tags
+        changed.append("tags")
+
+    if changed:
+        activity_crud.add(
+            db,
+            task=task,
+            actor=actor,
+            action=ActivityAction.UPDATED,
+            detail=f"changed: {', '.join(changed)}",
+        )
     db.commit()
     return get(db, task.id)
 
@@ -92,6 +124,30 @@ def update(db: Session, task: Task, data: TaskUpdate, *, tags: list[Tag] | None)
 def delete(db: Session, task: Task) -> None:
     db.delete(task)
     db.commit()
+
+
+def assign(db: Session, *, task: Task, assignee: User | None, actor: User) -> Task:
+    """Giao task cho user — nghiệp vụ gồm 2 thao tác ghi trong CÙNG 1 transaction:
+
+    1. Cập nhật tasks.assignee_id
+    2. Ghi lịch sử vào task_activities
+
+    Chỉ commit 1 lần ở cuối: bước 2 lỗi thì chưa có gì được commit, dependency get_db
+    rollback -> không bao giờ có trạng thái "task đã đổi người nhận nhưng không có lịch sử".
+    Assign lại đúng người hiện tại thì không ghi gì (giống update khi không có field nào đổi).
+    """
+    new_assignee_id = assignee.id if assignee else None
+    if task.assignee_id != new_assignee_id:
+        task.assignee = assignee
+        activity_crud.add(
+            db,
+            task=task,
+            actor=actor,
+            action=ActivityAction.ASSIGNED,
+            detail=f"assigned to {assignee.username}" if assignee else "unassigned",
+        )
+        db.commit()
+    return get(db, task.id)
 
 
 # ---------- Bookmark (Many-to-Many User <-> Task) ----------
@@ -124,7 +180,7 @@ def remove_bookmark(db: Session, *, user_id: int, task_id: int) -> None:
 
 
 def list_bookmarked(
-    db: Session, user_id: int, *, skip: int, limit: int
+    db: Session, user_id: int, pagination: PageParams
 ) -> tuple[list[Task], int]:
     total = db.scalar(
         select(func.count()).select_from(task_bookmarks).where(task_bookmarks.c.user_id == user_id)
@@ -135,7 +191,7 @@ def list_bookmarked(
         .where(task_bookmarks.c.user_id == user_id)
         .options(*TASK_LOAD_OPTIONS)
         .order_by(task_bookmarks.c.created_at.desc(), Task.id.desc())
-        .offset(skip)
-        .limit(limit)
+        .offset(pagination.skip)
+        .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total

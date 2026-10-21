@@ -1,11 +1,11 @@
 from datetime import date, datetime
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, PositiveInt, model_validator
 
 from app.core import messages
 from app.core.constants import TASK_TITLE_MAX_LENGTH
-from app.models.enums import TaskPriority, TaskStatus
+from app.models.enums import ActivityAction, TaskPriority, TaskStatus
 from app.schemas.common import InputSchema, ORMSchema, reject_null_fields
 from app.schemas.tag import TagOut
 from app.schemas.user import UserPublic
@@ -24,11 +24,23 @@ def _not_in_past(value: date | None) -> date | None:
 DueDate = Annotated[date | None, AfterValidator(_not_in_past)]
 
 
+def _single_line(value: str) -> str:
+    # Title được đưa vào tiêu đề email (header): ký tự xuống dòng làm header không hợp lệ
+    if "\n" in value or "\r" in value:
+        raise ValueError(messages.TITLE_MUST_BE_SINGLE_LINE)
+    return value
+
+
+TaskTitle = Annotated[
+    str,
+    Field(min_length=1, max_length=TASK_TITLE_MAX_LENGTH),
+    AfterValidator(_single_line),
+]
+
+
 # ---------- Input ----------
 class TaskCreate(InputSchema):
-    title: str = Field(
-        min_length=1, max_length=TASK_TITLE_MAX_LENGTH, examples=["Thiết kế database"]
-    )
+    title: TaskTitle = Field(examples=["Thiết kế database"])
     description: str | None = None
     status: TaskStatus = TaskStatus.TODO
     priority: TaskPriority = TaskPriority.MEDIUM
@@ -39,7 +51,7 @@ class TaskCreate(InputSchema):
 class TaskUpdate(InputSchema):
     """Partial update: chỉ field nào gửi lên mới được cập nhật."""
 
-    title: str | None = Field(default=None, min_length=1, max_length=TASK_TITLE_MAX_LENGTH)
+    title: TaskTitle | None = None
     description: str | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
@@ -51,6 +63,12 @@ class TaskUpdate(InputSchema):
         # description/due_date được phép null (xóa giá trị), còn các field NOT NULL thì không
         reject_null_fields(self, "title", "status", "priority", "tag_ids")
         return self
+
+
+class TaskAssign(InputSchema):
+    assignee_id: PositiveInt | None = Field(
+        description="User id được giao; null = bỏ assign", examples=[2]
+    )
 
 
 # ---------- Output ----------
@@ -83,3 +101,11 @@ class TaskOut(ORMSchema):
 class BookmarkOut(BaseModel):
     task_id: int
     bookmarked: bool
+
+
+class ActivityOut(ORMSchema):
+    id: int
+    action: ActivityAction
+    detail: str | None
+    actor: UserPublic
+    created_at: datetime

@@ -18,3 +18,10 @@ class TaskPriority(StrEnum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
+
+
+class ActivityAction(StrEnum):
+    CREATED = "created"
+    UPDATED = "updated"
+    ASSIGNED = "assigned"
+    COMMENTED = "commented"

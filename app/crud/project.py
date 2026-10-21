@@ -2,6 +2,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models import Project, Task, User
+from app.schemas.common import PageParams
 from app.schemas.project import ProjectCreate, ProjectUpdate
 
 
@@ -29,14 +30,14 @@ def get_detail(db: Session, project_id: int) -> Project | None:
     return db.scalar(stmt)
 
 
-def list_projects(db: Session, *, skip: int, limit: int) -> tuple[list[Project], int]:
+def list_projects(db: Session, pagination: PageParams) -> tuple[list[Project], int]:
     total = db.scalar(select(func.count()).select_from(Project))
     stmt = (
         select(Project)
         .options(joinedload(Project.owner))  # tránh N+1 khi trả về owner của từng project
         .order_by(Project.id)
-        .offset(skip)
-        .limit(limit)
+        .offset(pagination.skip)
+        .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total
 

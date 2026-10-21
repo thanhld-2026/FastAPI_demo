@@ -1,10 +1,56 @@
-"""Mục 3, 5: Task, lọc & phân trang, bookmark, phân quyền sửa/xóa task."""
+"""Mục 3, 5, 7: Task, lọc & phân trang, bookmark, N+1 query.
+
+Test đầu tiên là Integration Test bắt buộc của mục 7: luồng Đăng ký -> Tạo Task.
+"""
 
 from datetime import date, timedelta
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app.models import Task
+from tests.conftest import DEFAULT_PASSWORD
+
+
+def test_register_login_and_create_task_flow(client):
+    """Đi qua API giống hệt 1 client thật: không chạm trực tiếp vào DB."""
+    # 1. Đăng ký
+    register = client.post(
+        "/api/users/register",
+        json={"username": "alice", "email": "alice@example.com", "password": DEFAULT_PASSWORD},
+    )
+    assert register.status_code == 201
+
+    # 2. Đăng nhập -> nhận access token
+    login = client.post("/api/users/login", data={"username": "alice", "password": DEFAULT_PASSWORD})
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    # 3. Tạo project
+    project = client.post("/api/projects", json={"name": "TaskHub"}, headers=headers)
+    assert project.status_code == 201
+    project_id = project.json()["id"]
+
+    # 4. Tạo task trong project
+    due_date = (date.today() + timedelta(days=7)).isoformat()
+    created = client.post(
+        f"/api/projects/{project_id}/tasks",
+        json={"title": "Viết API đăng ký", "priority": "HIGH", "due_date": due_date},
+        headers=headers,
+    )
+    assert created.status_code == 201
+    task = created.json()
+    assert task["title"] == "Viết API đăng ký"
+    assert task["status"] == "TODO"  # giá trị mặc định
+    assert task["priority"] == "HIGH"
+    assert task["due_date"] == due_date
+    assert task["creator"]["username"] == "alice"
+    assert task["assignee"] is None
+
+    # 5. Đọc lại: task xuất hiện trong danh sách task của project
+    listed = client.get(f"/api/projects/{project_id}/tasks")
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 1
+    assert listed.json()["items"][0]["id"] == task["id"]
 
 
 def test_create_task_requires_login(client, make_user, make_project):
@@ -205,3 +251,68 @@ def test_error_responses_are_documented(client):
     assert {"400", "401", "403", "404", "422"} <= responses.keys()
     schema = responses["404"]["content"]["application/json"]["schema"]
     assert schema["$ref"].endswith("/ErrorResponse")
+
+
+
+def test_title_must_be_single_line(client, make_user, make_project, make_task):
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    task = make_task(project["id"], pm)
+
+    created = client.post(
+        f"/api/projects/{project['id']}/tasks", json={"title": "Fix\nlogin"}, headers=pm["headers"]
+    )
+    updated = client.put(
+        f"/api/tasks/{task['id']}", json={"title": "Fix\r\nlogin"}, headers=pm["headers"]
+    )
+
+    assert created.status_code == 422
+    assert updated.status_code == 422
+
+# ---------- N+1 query ----------
+def _seed_tasks(client, make_user, make_project, make_task, make_tag, count: int) -> None:
+    pm = make_user(f"pm_{count}")
+    dev = make_user(f"dev_{count}")
+    tag = make_tag(f"tag-{count}")
+    project = make_project(pm)
+    for i in range(count):
+        task = make_task(project["id"], pm, title=f"T{i}", tag_ids=[tag["id"]])
+        client.post(
+            f"/api/tasks/{task['id']}/assign",
+            json={"assignee_id": dev["id"]},
+            headers=pm["headers"],
+        )
+
+
+def test_listing_tasks_runs_constant_number_of_queries(
+    client, make_user, make_project, make_task, make_tag, sql_log
+):
+    """Số query KHÔNG tăng theo số task nhờ joinedload / selectinload."""
+    _seed_tasks(client, make_user, make_project, make_task, make_tag, count=2)
+    sql_log.clear()
+    client.get("/api/tasks")
+    queries_for_2_tasks = len(sql_log)
+
+    _seed_tasks(client, make_user, make_project, make_task, make_tag, count=10)
+    sql_log.clear()
+    resp = client.get("/api/tasks")
+    queries_for_12_tasks = len(sql_log)
+
+    assert resp.json()["total"] == 12
+    # 1 COUNT + 1 SELECT tasks JOIN users + 1 SELECT tags WHERE task_id IN (...)
+    assert queries_for_2_tasks == queries_for_12_tasks == 3
+
+
+def test_lazy_loading_causes_n_plus_one(
+    client, db, make_user, make_project, make_task, make_tag, sql_log
+):
+    """Minh họa vấn đề: KHÔNG eager load thì mỗi task sinh thêm query riêng."""
+    _seed_tasks(client, make_user, make_project, make_task, make_tag, count=5)
+    sql_log.clear()
+
+    tasks = db.scalars(select(Task)).all()  # 1 query
+    for task in tasks:
+        _ = task.assignee.username  # lazy load: +1 query / task (lần đầu gặp user đó)
+        _ = [tag.name for tag in task.tags]  # lazy load: +1 query / task
+
+    assert len(sql_log) > len(tasks)  # 1 + N... -> chính là N+1

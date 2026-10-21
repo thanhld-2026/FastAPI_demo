@@ -13,9 +13,12 @@ from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.models import (
+    ActivityAction,
+    Comment,
     Project,
     Tag,
     Task,
+    TaskActivity,
     TaskPriority,
     TaskStatus,
     User,
@@ -99,9 +102,27 @@ def seed() -> None:
                 tags=[tags[name] for name in tag_names],
                 due_date=today + timedelta(days=due_in),
             )
+            task.activities.append(TaskActivity(actor=users[creator], action=ActivityAction.CREATED))
+            if assignee:
+                task.activities.append(
+                    TaskActivity(
+                        actor=project.owner,
+                        action=ActivityAction.ASSIGNED,
+                        detail=f"assigned to {assignee}",
+                    )
+                )
             db.add(task)
             db.flush()
             tasks.append(task)
+
+        comments = [
+            (tasks[2], "carol", "Mình gợi ý tách logic phân quyền ra file permissions.py cho dễ test."),
+            (tasks[2], "alice", "Đồng ý, nhớ thêm test cho case member không được assign nhé."),
+            (tasks[6], "bob", "Design màn hình đã có trên Figma, Carol check giúp mình."),
+        ]
+        for task, author, content in comments:
+            task.comments.append(Comment(author=users[author], content=content))
+            task.activities.append(TaskActivity(actor=users[author], action=ActivityAction.COMMENTED))
 
         users["carol"].bookmarked_tasks.extend([tasks[2], tasks[5]])
 

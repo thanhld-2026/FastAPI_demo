@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/projects", tags=["Projects"])
 
 @router.get("", response_model=Page[ProjectOut], summary="Danh sách project")
 def list_projects(db: DbSession, pagination: Pagination):
-    items, total = crud.project.list_projects(db, skip=pagination.skip, limit=pagination.limit)
+    items, total = crud.project.list_projects(db, pagination)
     return Page.build(items, total, pagination)
 
 
@@ -91,8 +91,7 @@ def list_project_tasks(
         project_id=project.id,
         status=task_status,
         priority=priority,
-        skip=pagination.skip,
-        limit=pagination.limit,
+        pagination=pagination,
     )
     return Page.build(items, total, pagination)
 

@@ -2,6 +2,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Task, User, UserRole
+from app.schemas.common import PageParams
 from app.schemas.user import AdminUserUpdate, UserCreate, UserUpdate
 from app.security import DUMMY_HASH, hash_password, verify_password
 
@@ -66,9 +67,10 @@ def authenticate(db: Session, identifier: str, password: str) -> User | None:
     return user
 
 
-def list_users(db: Session, *, skip: int, limit: int) -> tuple[list[User], int]:
+def list_users(db: Session, pagination: PageParams) -> tuple[list[User], int]:
     total = db.scalar(select(func.count()).select_from(User))
-    users = db.scalars(select(User).order_by(User.id).offset(skip).limit(limit)).all()
+    stmt = select(User).order_by(User.id).offset(pagination.skip).limit(pagination.limit)
+    users = db.scalars(stmt).all()
     return list(users), total
 
 
