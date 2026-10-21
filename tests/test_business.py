@@ -1,8 +1,10 @@
 """Mục 6: Nghiệp vụ assign / comment, transaction và phân quyền chặt chẽ."""
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.crud import activity as activity_crud
+from app.models import User
 
 
 @pytest.fixture
@@ -126,6 +128,21 @@ def test_assign_is_rolled_back_when_activity_logging_fails(
     assert after["assignee"] is None
     assert [a["action"] for a in activities] == ["created"]
 
+
+
+def test_user_with_activity_history_cannot_be_deleted(client, db, make_user, setup_task):
+    """Activity log là dữ liệu audit: actor_id RESTRICT -> không xóa được user còn lịch sử."""
+    _, creator, task = setup_task
+    admin = make_user("boss", admin=True)  # chỉ dính tới DB qua activity "assigned"
+    client.post(
+        f"/api/tasks/{task['id']}/assign",
+        json={"assignee_id": creator["id"]},
+        headers=admin["headers"],
+    )
+
+    db.delete(db.get(User, admin["id"]))
+    with pytest.raises(IntegrityError):
+        db.commit()
 
 # ---------- Comments ----------
 def test_logged_in_user_can_comment(client, make_user, setup_task):

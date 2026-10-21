@@ -5,7 +5,12 @@ from typing import TYPE_CHECKING
 from sqlalchemy import String, Text, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.constants import EMAIL_MAX_LENGTH, FULL_NAME_MAX_LENGTH, USERNAME_MAX_LENGTH
+from app.core.constants import (
+    EMAIL_MAX_LENGTH,
+    FULL_NAME_MAX_LENGTH,
+    PASSWORD_HASH_MAX_LENGTH,
+    USERNAME_MAX_LENGTH,
+)
 from app.database import Base
 from app.models.associations import task_bookmarks
 from app.models.base import TimestampMixin, enum_column
@@ -23,7 +28,7 @@ class User(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(USERNAME_MAX_LENGTH), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(EMAIL_MAX_LENGTH), unique=True, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(255))
+    hashed_password: Mapped[str] = mapped_column(String(PASSWORD_HASH_MAX_LENGTH))
     full_name: Mapped[str | None] = mapped_column(String(FULL_NAME_MAX_LENGTH))
     bio: Mapped[str | None] = mapped_column(Text)
     role: Mapped[UserRole] = mapped_column(

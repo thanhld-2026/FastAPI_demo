@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.constants import ACTIVITY_DETAIL_MAX_LENGTH
 from app.database import Base
 from app.models.base import enum_column
 from app.models.enums import ActivityAction
@@ -26,9 +27,11 @@ class TaskActivity(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
-    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # RESTRICT: lịch sử là dữ liệu audit, không được mất theo khi xóa user
+    # (muốn "xóa" user thì khóa tài khoản: is_active = False)
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     action: Mapped[ActivityAction] = mapped_column(enum_column(ActivityAction))
-    detail: Mapped[str | None] = mapped_column(String(255))
+    detail: Mapped[str | None] = mapped_column(String(ACTIVITY_DETAIL_MAX_LENGTH))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     task: Mapped[Task] = relationship(back_populates="activities")
