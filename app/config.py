@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     # --- Redis cache ---
     REDIS_URL: str | None = None  # None / rỗng -> tắt cache
-    TAGS_CACHE_TTL: int = 300  # giây
+    LABELS_CACHE_TTL: int = 300  # giây
     REDIS_SOCKET_TIMEOUT: float = 1.0  # giây; Redis chết -> fail nhanh, không treo request
 
     # --- Email ---

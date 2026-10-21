@@ -15,7 +15,7 @@ from app.dependencies import (
     Pagination,
     ReadableTask,
     ReadableTaskId,
-    get_tags_by_ids,
+    get_labels_by_ids,
 )
 from app.models import TaskPriority, TaskStatus
 from app.schemas.common import Page
@@ -75,8 +75,10 @@ def get_task(task: ReadableTask):
     responses=error_responses(400, 401, 403, 404, 409),
 )
 def update_task(data: TaskUpdate, task: EditableTask, current_user: CurrentUser, db: DbSession):
-    tags = get_tags_by_ids(db, data.tag_ids) if data.tag_ids is not None else None
-    return crud.task.update(db, task, data, tags=tags, actor=current_user)
+    labels = None
+    if data.label_ids is not None:
+        labels = get_labels_by_ids(db, task.project_id, data.label_ids)
+    return crud.task.update(db, task, data, labels=labels, actor=current_user)
 
 
 @router.delete(
@@ -98,6 +100,34 @@ def delete_task(task: DeletableTask, db: DbSession):
 def assign_task(data: TaskAssign, task: AssignableTask, current_user: CurrentUser, db: DbSession):
     return task_service.assign_task(
         db, task=task, assignee_id=data.assignee_id, actor=current_user
+    )
+
+
+@router.post(
+    "/{task_id}/labels/{label_id}",
+    response_model=TaskOut,
+    summary="[EDITOR] Gắn label (cùng project) cho task (idempotent)",
+    responses=error_responses(401, 403, 404, 409),
+)
+def add_task_label(
+    label_id: int, task: EditableTask, current_user: CurrentUser, db: DbSession
+):
+    return task_service.set_task_label(
+        db, task=task, label_id=label_id, attached=True, actor=current_user
+    )
+
+
+@router.delete(
+    "/{task_id}/labels/{label_id}",
+    response_model=TaskOut,
+    summary="[EDITOR] Gỡ label khỏi task (idempotent)",
+    responses=error_responses(401, 403, 404, 409),
+)
+def remove_task_label(
+    label_id: int, task: EditableTask, current_user: CurrentUser, db: DbSession
+):
+    return task_service.set_task_label(
+        db, task=task, label_id=label_id, attached=False, actor=current_user
     )
 
 

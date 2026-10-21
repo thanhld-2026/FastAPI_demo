@@ -36,7 +36,7 @@ class Workspace(TimestampMixin, Base):
 class WorkspaceMember(Base):
     """Bảng trung gian User <-> Workspace có thêm cột `role`.
 
-    Khác task_tags / task_bookmarks (bảng thuần, dùng `secondary=`): bảng có dữ liệu riêng thì
+    Khác task_labels / task_bookmarks (bảng thuần, dùng `secondary=`): bảng có dữ liệu riêng thì
     khai báo thành class (association object) để đọc / ghi được cột role.
     """
 

@@ -7,9 +7,9 @@ from app.crud import activity as activity_crud
 from app.crud.workspace import member_workspace_ids
 from app.models import (
     ActivityAction,
+    Label,
     Project,
     ProjectStatus,
-    Tag,
     Task,
     TaskPriority,
     TaskStatus,
@@ -21,12 +21,12 @@ from app.schemas.task import TaskCreate, TaskUpdate
 
 # Eager loading dùng chung cho mọi query trả về TaskOut.
 # Không có dòng này: trả về 20 task -> 1 query lấy task + 20 query creator
-# + 20 query assignee + 20 query tags = 61 query (N+1 problem).
-# Có dòng này: luôn chỉ 2 query (task JOIN users, và 1 query lấy tags).
+# + 20 query assignee + 20 query labels = 61 query (N+1 problem).
+# Có dòng này: luôn chỉ 2 query (task JOIN users, và 1 query lấy labels).
 TASK_LOAD_OPTIONS = (
     joinedload(Task.creator),  # Many-to-One -> LEFT OUTER JOIN
     joinedload(Task.assignee),  # Many-to-One -> LEFT OUTER JOIN
-    selectinload(Task.tags),  # Many-to-Many -> SELECT ... WHERE task_id IN (...)
+    selectinload(Task.labels),  # Many-to-Many -> SELECT ... WHERE task_id IN (...)
 )
 
 
@@ -124,9 +124,10 @@ def list_tasks(
 
 
 def create(
-    db: Session, *, project: Project, data: TaskCreate, tags: list[Tag], creator: User
+    db: Session, *, project: Project, data: TaskCreate, labels: list[Label], creator: User
 ) -> Task:
-    task = Task(**data.model_dump(exclude={"tag_ids"}), project=project, creator=creator, tags=tags)
+    values = data.model_dump(exclude={"label_ids"})
+    task = Task(**values, project=project, creator=creator, labels=labels)
     db.add(task)
     activity_crud.add(db, task=task, actor=creator, action=ActivityAction.CREATED)
     db.commit()  # task + activity được lưu trong cùng 1 transaction
@@ -134,15 +135,15 @@ def create(
 
 
 def update(
-    db: Session, task: Task, data: TaskUpdate, *, tags: list[Tag] | None, actor: User
+    db: Session, task: Task, data: TaskUpdate, *, labels: list[Label] | None, actor: User
 ) -> Task:
-    values = data.model_dump(exclude_unset=True, exclude={"tag_ids"})
+    values = data.model_dump(exclude_unset=True, exclude={"label_ids"})
     changed = [field for field, value in values.items() if getattr(task, field) != value]
     for field, value in values.items():
         setattr(task, field, value)
-    if tags is not None and {t.id for t in task.tags} != {t.id for t in tags}:
-        task.tags = tags
-        changed.append("tags")
+    if labels is not None and {lb.id for lb in task.labels} != {lb.id for lb in labels}:
+        task.labels = labels
+        changed.append("labels")
 
     if changed:
         activity_crud.add(
@@ -184,6 +185,26 @@ def assign(db: Session, *, task: Task, assignee: User | None, actor: User) -> Ta
         db.commit()
     return _reload(db, task.id)
 
+
+
+def set_label(db: Session, *, task: Task, label: Label, attached: bool, actor: User) -> Task:
+    """Gắn / gỡ 1 label + ghi activity trong 1 commit. Idempotent: đã đúng trạng thái thì
+    không ghi gì (giống update khi không có field nào đổi)."""
+    if (label in task.labels) != attached:
+        if attached:
+            task.labels.append(label)
+        else:
+            task.labels.remove(label)
+        verb = "added" if attached else "removed"
+        activity_crud.add(
+            db,
+            task=task,
+            actor=actor,
+            action=ActivityAction.UPDATED,
+            detail=f"{verb} label {label.name}",
+        )
+        db.commit()
+    return _reload(db, task.id)
 
 # ---------- Bookmark (Many-to-Many User <-> Task) ----------
 def is_bookmarked(db: Session, *, user_id: int, task_id: int) -> bool:

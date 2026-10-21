@@ -42,10 +42,10 @@ ASSIGNEE_NOT_EDITOR = "Assignee must be an active member with at least the EDITO
 COMMENT_NOT_FOUND = "Comment not found"
 COMMENT_MODIFY_FORBIDDEN = "Only the comment author or the workspace owner can modify this comment"
 
-# --- Tag ---
-TAG_NOT_FOUND = "Tag not found"
-TAG_ALREADY_EXISTS = "Tag already exists"
-TAG_IDS_NOT_FOUND = "Tag ids not found: {ids}"
+# --- Label ---
+LABEL_NOT_FOUND = "Label not found"
+LABEL_ALREADY_EXISTS = "A label with this name already exists in the project"
+LABEL_IDS_NOT_FOUND = "Label ids not found in this project: {ids}"
 
 # --- Validate input (schema) ---
 FIELD_CANNOT_BE_NULL = "{field} cannot be null"

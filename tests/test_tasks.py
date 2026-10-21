@@ -69,28 +69,28 @@ def test_create_task_requires_login(client, make_user, make_project):
     assert resp.status_code == 401
 
 
-def test_create_task_with_tags(client, make_user, make_project, make_tag):
+def test_create_task_with_labels(client, make_user, make_project, make_label):
     pm = make_user("pmuser")
     project = make_project(pm)
-    backend, bug = make_tag("backend"), make_tag("bug")
+    backend, bug = make_label(project, pm, "backend"), make_label(project, pm, "bug")
 
     resp = client.post(
         f"/api/v1/projects/{project['id']}/tasks",
-        json={"title": "Fix login", "tag_ids": [bug["id"], backend["id"], bug["id"]]},
+        json={"title": "Fix login", "label_ids": [bug["id"], backend["id"], bug["id"]]},
         headers=pm["headers"],
     )
 
     assert resp.status_code == 201
-    assert [t["name"] for t in resp.json()["tags"]] == ["backend", "bug"]
+    assert [lb["name"] for lb in resp.json()["labels"]] == ["backend", "bug"]
 
 
-def test_create_task_with_unknown_tag_returns_400(client, make_user, make_project):
+def test_create_task_with_unknown_label_returns_400(client, make_user, make_project):
     pm = make_user("pmuser")
     project = make_project(pm)
 
     resp = client.post(
         f"/api/v1/projects/{project['id']}/tasks",
-        json={"title": "X", "tag_ids": [999]},
+        json={"title": "X", "label_ids": [999]},
         headers=pm["headers"],
     )
 
@@ -356,14 +356,14 @@ def test_in_review_status_and_urgent_priority(client, make_user, make_project, m
     assert [t["title"] for t in resp.json()["items"]] == ["Review PR"]
 
 # ---------- N+1 query ----------
-def _seed_tasks(client, make_user, make_project, make_task, make_tag, add_member, count: int):
+def _seed_tasks(client, make_user, make_project, make_task, make_label, add_member, count: int):
     pm = make_user(f"pm_{count}")
     dev = make_user(f"dev_{count}")
-    tag = make_tag(f"tag-{count}")
     project = make_project(pm)
+    label = make_label(project, pm, f"label-{count}")
     add_member(project, pm, dev)
     for i in range(count):
-        task = make_task(project["id"], pm, title=f"T{i}", tag_ids=[tag["id"]])
+        task = make_task(project["id"], pm, title=f"T{i}", label_ids=[label["id"]])
         client.post(
             f"/api/v1/tasks/{task['id']}/assign",
             json={"assignee_id": dev["id"]},
@@ -372,11 +372,11 @@ def _seed_tasks(client, make_user, make_project, make_task, make_tag, add_member
 
 
 def test_listing_tasks_runs_constant_number_of_queries(
-    client, make_user, make_project, make_task, make_tag, add_member, sql_log
+    client, make_user, make_project, make_task, make_label, add_member, sql_log
 ):
     """Số query KHÔNG tăng theo số task nhờ joinedload / selectinload."""
     admin = make_user("boss", admin=True)  # admin thấy task ở mọi workspace
-    seed = (client, make_user, make_project, make_task, make_tag, add_member)
+    seed = (client, make_user, make_project, make_task, make_label, add_member)
     _seed_tasks(*seed, count=2)
     sql_log.clear()
     client.get("/api/v1/tasks", headers=admin["headers"])
@@ -389,20 +389,20 @@ def test_listing_tasks_runs_constant_number_of_queries(
 
     assert resp.json()["total"] == 12
     # 1 SELECT user (xác thực token) + 1 COUNT + 1 SELECT tasks JOIN users
-    # + 1 SELECT tags WHERE task_id IN (...)
+    # + 1 SELECT labels WHERE task_id IN (...)
     assert queries_for_2_tasks == queries_for_12_tasks == 4
 
 
 def test_lazy_loading_causes_n_plus_one(
-    client, db, make_user, make_project, make_task, make_tag, add_member, sql_log
+    client, db, make_user, make_project, make_task, make_label, add_member, sql_log
 ):
     """Minh họa vấn đề: KHÔNG eager load thì mỗi task sinh thêm query riêng."""
-    _seed_tasks(client, make_user, make_project, make_task, make_tag, add_member, count=5)
+    _seed_tasks(client, make_user, make_project, make_task, make_label, add_member, count=5)
     sql_log.clear()
 
     tasks = db.scalars(select(Task)).all()  # 1 query
     for task in tasks:
         _ = task.assignee.username  # lazy load: +1 query / task (lần đầu gặp user đó)
-        _ = [tag.name for tag in task.tags]  # lazy load: +1 query / task
+        _ = [label.name for label in task.labels]  # lazy load: +1 query / task
 
     assert len(sql_log) > len(tasks)  # 1 + N... -> chính là N+1

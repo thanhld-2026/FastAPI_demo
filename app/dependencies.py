@@ -33,9 +33,9 @@ from app.core.exceptions import (
 from app.database import get_db
 from app.models import (
     Comment,
+    Label,
     Project,
     ProjectStatus,
-    Tag,
     Task,
     User,
     Workspace,
@@ -72,17 +72,7 @@ def get_current_active_user(user: Annotated[User, Depends(get_current_user)]) ->
 CurrentUser = Annotated[User, Depends(get_current_active_user)]
 
 
-# ---------- Resource không thuộc workspace ----------
-def get_existing_tag(tag_id: int, db: DbSession) -> Tag:
-    tag = crud.tag.get(db, tag_id)
-    if tag is None:
-        raise NotFoundException(messages.TAG_NOT_FOUND)
-    return tag
-
-
-TagDep = Annotated[Tag, Depends(get_existing_tag)]
-
-
+# ---------- Admin hệ thống ----------
 def verify_admin_role(user: CurrentUser) -> User:
     if not permissions.is_admin(user):
         raise ForbiddenException(messages.ADMIN_REQUIRED)
@@ -172,7 +162,7 @@ ChangeableProject = Annotated[
 
 
 def task_access(minimum: WorkspaceRole, *, writable: bool = False) -> Callable[..., Task]:
-    """Task trên URL (load đủ creator / assignee / tags) + role tối thiểu trong workspace."""
+    """Task trên URL (load đủ creator / assignee / labels) + role tối thiểu trong workspace."""
 
     def dependency(task_id: int, user: CurrentUser, db: DbSession) -> Task:
         task = crud.task.get(db, task_id)
@@ -191,6 +181,27 @@ def task_access(minimum: WorkspaceRole, *, writable: bool = False) -> Callable[.
 
 ReadableTask = Annotated[Task, Depends(task_access(WorkspaceRole.VIEWER))]
 EditableTask = Annotated[Task, Depends(task_access(WorkspaceRole.EDITOR, writable=True))]
+
+
+def label_access(minimum: WorkspaceRole, *, writable: bool = False) -> Callable[..., Label]:
+    """Label trên URL + role tối thiểu trong workspace chứa project của label."""
+
+    def dependency(label_id: int, user: CurrentUser, db: DbSession) -> Label:
+        label = crud.label.get(db, label_id)
+        if label is None:
+            raise NotFoundException(messages.LABEL_NOT_FOUND)
+        role = crud.workspace.get_role_for_project(db, label.project_id, user.id)
+        _require_member(user, role, messages.LABEL_NOT_FOUND)
+        if writable:
+            status = crud.project.lock_status(db, label.project_id)
+            _raise_if_not_writable(status, messages.LABEL_NOT_FOUND)
+        _require_role(user, role, minimum)
+        return label
+
+    return dependency
+
+
+EditableLabel = Annotated[Label, Depends(label_access(WorkspaceRole.EDITOR, writable=True))]
 
 
 def get_readable_task_id(task_id: int, user: CurrentUser, db: DbSession) -> int:
@@ -277,10 +288,10 @@ Pagination = Annotated[PageParams, Depends(get_pagination)]
 
 
 # ---------- Helper dùng chung cho router ----------
-def get_tags_by_ids(db: Session, tag_ids: list[int]) -> list[Tag]:
-    """Body tham chiếu tới tag không tồn tại -> 400 (khác 404 dành cho resource trên URL)."""
-    tags = crud.tag.get_many(db, tag_ids)
-    missing = set(tag_ids) - {tag.id for tag in tags}
+def get_labels_by_ids(db: Session, project_id: int, label_ids: list[int]) -> list[Label]:
+    """Body tham chiếu label không tồn tại / thuộc project khác -> 400 (404 dành cho URL)."""
+    labels = crud.label.get_many_in_project(db, project_id, label_ids)
+    missing = set(label_ids) - {label.id for label in labels}
     if missing:
-        raise BadRequestException(messages.TAG_IDS_NOT_FOUND.format(ids=sorted(missing)))
-    return tags
+        raise BadRequestException(messages.LABEL_IDS_NOT_FOUND.format(ids=sorted(missing)))
+    return labels
