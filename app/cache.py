@@ -25,8 +25,8 @@ def get_redis() -> redis.Redis | None:
         _client = redis.Redis.from_url(
             settings.REDIS_URL,
             decode_responses=True,
-            socket_connect_timeout=1,  # Redis chết -> fail nhanh, không treo request
-            socket_timeout=1,
+            socket_connect_timeout=settings.REDIS_SOCKET_TIMEOUT,
+            socket_timeout=settings.REDIS_SOCKET_TIMEOUT,
         )
     return _client
 

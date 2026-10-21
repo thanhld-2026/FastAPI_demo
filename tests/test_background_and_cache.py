@@ -65,6 +65,16 @@ def test_send_email_only_logs_when_disabled(caplog, monkeypatch):
     assert "email disabled" in caplog.text
 
 
+def test_send_email_logs_instead_of_crashing_on_invalid_header(caplog, monkeypatch):
+    """Subject có ký tự xuống dòng -> header không hợp lệ: chỉ ghi log, task không chết."""
+    monkeypatch.setattr(email_service.settings, "EMAIL_ENABLED", True)
+
+    with caplog.at_level(logging.ERROR, logger="app.services.email"):
+        email_service.send_email("a@example.com", "Hello\nInjected: header", "Body")
+
+    assert "Failed to send email" in caplog.text
+
+
 # ---------- Cache ----------
 @pytest.fixture
 def fake_redis(monkeypatch) -> fakeredis.FakeRedis:

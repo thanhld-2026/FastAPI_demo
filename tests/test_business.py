@@ -97,13 +97,14 @@ def test_assign_is_rolled_back_when_activity_logging_fails(
         raise RuntimeError("simulated failure while writing activity")
 
     monkeypatch.setattr(activity_crud, "add", broken_add)
-    with pytest.raises(RuntimeError):
-        client.post(
-            f"/api/tasks/{task['id']}/assign",
-            json={"assignee_id": dev["id"]},
-            headers=pm["headers"],
-        )
+    resp = client.post(
+        f"/api/tasks/{task['id']}/assign",
+        json={"assignee_id": dev["id"]},
+        headers=pm["headers"],
+    )
     monkeypatch.undo()
+
+    assert resp.status_code == 500
 
     after = client.get(f"/api/tasks/{task['id']}").json()
     activities = client.get(f"/api/tasks/{task['id']}/activities").json()["items"]

@@ -24,11 +24,23 @@ def _not_in_past(value: date | None) -> date | None:
 DueDate = Annotated[date | None, AfterValidator(_not_in_past)]
 
 
+def _single_line(value: str) -> str:
+    # Title được đưa vào tiêu đề email (header): ký tự xuống dòng làm header không hợp lệ
+    if "\n" in value or "\r" in value:
+        raise ValueError(messages.TITLE_MUST_BE_SINGLE_LINE)
+    return value
+
+
+TaskTitle = Annotated[
+    str,
+    Field(min_length=1, max_length=TASK_TITLE_MAX_LENGTH),
+    AfterValidator(_single_line),
+]
+
+
 # ---------- Input ----------
 class TaskCreate(InputSchema):
-    title: str = Field(
-        min_length=1, max_length=TASK_TITLE_MAX_LENGTH, examples=["Thiết kế database"]
-    )
+    title: TaskTitle = Field(examples=["Thiết kế database"])
     description: str | None = None
     status: TaskStatus = TaskStatus.TODO
     priority: TaskPriority = TaskPriority.MEDIUM
@@ -39,7 +51,7 @@ class TaskCreate(InputSchema):
 class TaskUpdate(InputSchema):
     """Partial update: chỉ field nào gửi lên mới được cập nhật."""
 
-    title: str | None = Field(default=None, min_length=1, max_length=TASK_TITLE_MAX_LENGTH)
+    title: TaskTitle | None = None
     description: str | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None

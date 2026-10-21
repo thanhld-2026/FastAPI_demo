@@ -26,6 +26,10 @@ COMMENT_MAX_LENGTH = 2000
 # --- Tag ---
 TAG_NAME_MAX_LENGTH = 30
 
+# --- Request id (header X-Request-ID) ---
+# Chỉ nhận id client gửi lên nếu đúng định dạng, không thì tự sinh (tránh làm bẩn log)
+REQUEST_ID_PATTERN = r"[A-Za-z0-9._-]{1,64}"
+
 # --- Pagination ---
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100

@@ -253,6 +253,22 @@ def test_error_responses_are_documented(client):
     assert schema["$ref"].endswith("/ErrorResponse")
 
 
+
+def test_title_must_be_single_line(client, make_user, make_project, make_task):
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    task = make_task(project["id"], pm)
+
+    created = client.post(
+        f"/api/projects/{project['id']}/tasks", json={"title": "Fix\nlogin"}, headers=pm["headers"]
+    )
+    updated = client.put(
+        f"/api/tasks/{task['id']}", json={"title": "Fix\r\nlogin"}, headers=pm["headers"]
+    )
+
+    assert created.status_code == 422
+    assert updated.status_code == 422
+
 # ---------- N+1 query ----------
 def _seed_tasks(client, make_user, make_project, make_task, make_tag, count: int) -> None:
     pm = make_user(f"pm_{count}")

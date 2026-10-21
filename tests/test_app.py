@@ -1,9 +1,6 @@
 """Mục 8: Health check, CORS, request id, xử lý lỗi toàn cục."""
 
-from fastapi.testclient import TestClient
-
 from app import crud
-from app.main import app
 
 
 def test_health(client):
@@ -19,6 +16,15 @@ def test_every_response_has_request_id(client):
 
     assert generated.headers["X-Request-ID"]
     assert forwarded.headers["X-Request-ID"] == "abc123"
+
+
+def test_invalid_request_id_from_client_is_replaced(client):
+    too_long = client.get("/health", headers={"X-Request-ID": "a" * 500})
+    weird_chars = client.get("/health", headers={"X-Request-ID": "abc;DROP TABLE"})
+
+    for resp in (too_long, weird_chars):
+        request_id = resp.headers["X-Request-ID"]
+        assert len(request_id) == 12 and request_id.isalnum()  # id tự sinh
 
 
 def test_cors_allows_configured_frontend_origin(client):
@@ -45,12 +51,14 @@ def test_unhandled_error_returns_generic_500(client, monkeypatch):
         raise RuntimeError("database exploded: SELECT * FROM secret_table")
 
     monkeypatch.setattr(crud.tag, "list_tags", broken_list_tags)
-    # raise_server_exceptions=False: nhận response 500 như client thật thay vì exception.
-    # (fixture `client` đã override get_db nên client này cũng dùng DB test)
-    safe_client = TestClient(app, raise_server_exceptions=False)
 
-    resp = safe_client.get("/api/tags", headers={"X-Request-ID": "req-500"})
+    resp = client.get(
+        "/api/tags", headers={"X-Request-ID": "req-500", "Origin": "http://localhost:3000"}
+    )
 
     assert resp.status_code == 500
     assert resp.json() == {"detail": "Internal server error", "request_id": "req-500"}
     assert "secret_table" not in resp.text  # không lộ chi tiết lỗi nội bộ
+    # Response 500 vẫn đi qua CORS + middleware log -> FE đọc được lỗi và request id
+    assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert resp.headers["X-Request-ID"] == "req-500"

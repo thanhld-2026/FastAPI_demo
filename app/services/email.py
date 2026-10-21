@@ -20,21 +20,25 @@ def send_email(to: str, subject: str, body: str) -> None:
         logger.info("[email disabled] to=%s subject=%r", to, subject)
         return
 
-    message = EmailMessage()
-    message["From"] = settings.EMAIL_FROM
-    message["To"] = to
-    message["Subject"] = subject
-    message.set_content(body)
-
     try:
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as smtp:
+        # Dựng message cũng nằm trong try: header không hợp lệ (vd subject có ký tự xuống dòng)
+        # ném ValueError, nếu để ngoài thì background task chết mà không có log
+        message = EmailMessage()
+        message["From"] = settings.EMAIL_FROM
+        message["To"] = to
+        message["Subject"] = subject
+        message.set_content(body)
+
+        with smtplib.SMTP(
+            settings.SMTP_HOST, settings.SMTP_PORT, timeout=settings.SMTP_TIMEOUT
+        ) as smtp:
             if settings.SMTP_USE_TLS:
                 smtp.starttls()
             if settings.SMTP_USER and settings.SMTP_PASSWORD:
                 smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
             smtp.send_message(message)
         logger.info("Email sent to=%s subject=%r", to, subject)
-    except (smtplib.SMTPException, OSError):
+    except (smtplib.SMTPException, OSError, ValueError):
         logger.exception("Failed to send email to=%s subject=%r", to, subject)
 
 
