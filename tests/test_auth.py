@@ -124,33 +124,33 @@ def test_me_works_with_legacy_email_stored_in_db(client, db, make_user):
     assert resp.json()["email"] == "alice@taskhub.local"
 
 
-def test_update_me_including_password(client, make_user):
+def test_patch_me_updates_only_sent_fields(client, make_user):
+    alice = make_user("alice")
+    url = "/api/v1/users/me"
+
+    first = client.patch(url, json={"full_name": "Alice Nguyen"}, headers=alice["headers"])
+    second = client.patch(url, json={"bio": "Backend dev"}, headers=alice["headers"])
+
+    assert first.status_code == 200
+    assert second.json()["full_name"] == "Alice Nguyen"  # field không gửi giữ nguyên
+    assert second.json()["bio"] == "Backend dev"
+
+
+def test_patch_me_cannot_change_password(client, make_user):
     alice = make_user("alice")
 
-    resp = client.put(
-        "/api/v1/users/me",
-        json={"full_name": "Alice Nguyen", "bio": "Backend dev", "password": "NewPassword456"},
-        headers=alice["headers"],
+    resp = client.patch(
+        "/api/v1/users/me", json={"password": "NewPassword456"}, headers=alice["headers"]
     )
 
-    assert resp.status_code == 200
-    assert resp.json()["full_name"] == "Alice Nguyen"
-    assert resp.json()["bio"] == "Backend dev"
-    old_login = client.post(
-        "/api/v1/auth/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
-    )
-    new_login = client.post(
-        "/api/v1/auth/login", data={"username": "alice", "password": "NewPassword456"}
-    )
-    assert old_login.status_code == 401
-    assert new_login.status_code == 200
+    assert resp.status_code == 422  # phải dùng PUT /users/me/password
 
 
 def test_update_me_with_taken_email_returns_409(client, make_user):
     make_user("alice")
     bob = make_user("bob")
 
-    resp = client.put(
+    resp = client.patch(
         "/api/v1/users/me", json={"email": "alice@example.com"}, headers=bob["headers"]
     )
 
@@ -202,7 +202,7 @@ def test_update_me_email_race_condition_returns_409(client, make_user, monkeypat
     # Giả lập request còn lại chưa kịp commit lúc bob check email
     monkeypatch.setattr(crud.user, "get_by_email", lambda db, email: None)
 
-    resp = client.put(
+    resp = client.patch(
         "/api/v1/users/me", json={"email": "alice@example.com"}, headers=bob["headers"]
     )
 

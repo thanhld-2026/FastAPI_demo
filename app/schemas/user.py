@@ -48,16 +48,31 @@ class UserCreate(InputSchema):
 
 
 class UserUpdate(InputSchema):
-    """PUT /api/v1/users/me: chỉ cập nhật những field client gửi lên (exclude_unset)."""
+    """PATCH /api/v1/users/me: chỉ cập nhật những field client gửi lên (exclude_unset).
+
+    Không có `password`: đổi mật khẩu dùng endpoint riêng, bắt nhập mật khẩu hiện tại
+    (gửi field lạ -> 422 nhờ extra="forbid").
+    """
 
     email: EmailStr | None = None
     full_name: str | None = Field(default=None, max_length=FULL_NAME_MAX_LENGTH)
     bio: str | None = Field(default=None, max_length=BIO_MAX_LENGTH)
-    password: Password | None = None
 
     @model_validator(mode="after")
     def _reject_null_required(self):
-        reject_null_fields(self, "email", "password")
+        reject_null_fields(self, "email")
+        return self
+
+
+class PasswordChange(InputSchema):
+    # Mật khẩu hiện tại không validate độ dài: chỉ cần so với hash đang lưu
+    current_password: str = Field(examples=["Password123"])
+    new_password: Password = Field(examples=["NewPassword456"])
+
+    @model_validator(mode="after")
+    def _new_must_differ(self):
+        if self.new_password == self.current_password:
+            raise ValueError(messages.NEW_PASSWORD_SAME_AS_CURRENT)
         return self
 
 

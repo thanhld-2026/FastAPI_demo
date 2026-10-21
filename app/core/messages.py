@@ -9,6 +9,8 @@ INCORRECT_LOGIN = "Incorrect username or password"
 INACTIVE_USER = "Inactive user"
 ADMIN_REQUIRED = "Admin privileges required"
 INVALID_REFRESH_TOKEN = "Invalid, expired or revoked refresh token"
+WRONG_CURRENT_PASSWORD = "Current password is incorrect"
+NEW_PASSWORD_SAME_AS_CURRENT = "New password must be different from the current password"
 
 # --- User ---
 USER_NOT_FOUND = "User not found"

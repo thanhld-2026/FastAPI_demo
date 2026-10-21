@@ -1,8 +1,8 @@
-"""Nghiệp vụ xác thực: đăng nhập, refresh token (rotation), logout.
+"""Nghiệp vụ xác thực: đăng nhập, refresh token (rotation), logout, đổi mật khẩu.
 
 Access token (JWT, 15 phút): không lưu DB, không thu hồi được -> để sống ngắn.
-Refresh token (chuỗi ngẫu nhiên, 7 ngày): lưu hash trong DB -> thu hồi được khi logout.
-Mỗi refresh token chỉ dùng được 1 lần: refresh xong thì token cũ bị thu hồi và
+Refresh token (chuỗi ngẫu nhiên, 7 ngày): lưu hash trong DB -> thu hồi được khi logout /
+đổi mật khẩu. Mỗi refresh token chỉ dùng được 1 lần: refresh xong thì token cũ bị thu hồi và
 trỏ sang token mới (rotation).
 """
 
@@ -13,10 +13,11 @@ from sqlalchemy.orm import Session
 from app import crud
 from app.config import settings
 from app.core import messages
-from app.core.exceptions import ForbiddenException, UnauthorizedException
+from app.core.exceptions import BadRequestException, ForbiddenException, UnauthorizedException
 from app.models import RefreshToken, User
 from app.schemas.auth import TokenPair
-from app.security import create_access_token, create_refresh_token, hash_token
+from app.schemas.user import PasswordChange
+from app.security import create_access_token, create_refresh_token, hash_token, verify_password
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -88,3 +89,17 @@ def logout(db: Session, raw_refresh: str) -> None:
     if token is not None and token.revoked_at is None:
         crud.refresh_token.revoke(db, token)
         db.commit()
+
+
+def change_password(db: Session, user: User, data: PasswordChange) -> None:
+    """Đổi mật khẩu + thu hồi mọi refresh token của user (đăng xuất mọi thiết bị) trong 1 commit.
+
+    Access token đang dùng vẫn sống tới khi hết hạn (tối đa ACCESS_TOKEN_EXPIRE_MINUTES).
+    """
+    if not verify_password(data.current_password, user.hashed_password):
+        # 400 chứ không phải 401: user vẫn đăng nhập hợp lệ, chỉ nhập sai mật khẩu cũ
+        # (401 sẽ khiến FE tưởng phiên hết hạn và đẩy về màn login)
+        raise BadRequestException(messages.WRONG_CURRENT_PASSWORD)
+    crud.user.set_password(user, data.new_password)
+    crud.refresh_token.revoke_all_for_user(db, user.id)
+    db.commit()

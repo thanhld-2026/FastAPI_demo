@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.exc import IntegrityError
 
 from app import crud
@@ -10,7 +10,8 @@ from app.models import UserRole
 from app.schemas.common import Page
 from app.schemas.profile import UserProfile
 from app.schemas.task import TaskOut
-from app.schemas.user import AdminUserUpdate, UserOut, UserUpdate
+from app.schemas.user import AdminUserUpdate, PasswordChange, UserOut, UserUpdate
+from app.services import auth as auth_service
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -25,10 +26,10 @@ def read_me(current_user: CurrentUser):
     return current_user
 
 
-@router.put(
+@router.patch(
     "/me",
     response_model=UserOut,
-    summary="Cập nhật thông tin cá nhân",
+    summary="Cập nhật thông tin cá nhân (chỉ field được gửi lên)",
     responses=error_responses(401, 403, 409),
 )
 def update_me(data: UserUpdate, current_user: CurrentUser, db: DbSession):
@@ -45,6 +46,16 @@ def update_me(data: UserUpdate, current_user: CurrentUser, db: DbSession):
         # 2 request đổi sang cùng 1 email gần như đồng thời -> UNIQUE trong DB chặn request sau
         db.rollback()
         raise ConflictException(messages.EMAIL_TAKEN) from None
+
+
+@router.put(
+    "/me/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Đổi mật khẩu (đăng xuất mọi thiết bị khác)",
+    responses=error_responses(400, 401, 403),
+)
+def change_password(data: PasswordChange, current_user: CurrentUser, db: DbSession):
+    auth_service.change_password(db, current_user, data)
 
 
 @router.get(

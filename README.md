@@ -8,7 +8,7 @@ RESTful API quản lý **project** và **task** (giống Jira/Trello thu nhỏ),
 | ORM / Migration | SQLAlchemy 2.1 (sync) + Alembic |
 | Database | PostgreSQL 17 (driver psycopg 3) |
 | Validate dữ liệu | Pydantic v2, pydantic-settings, python-dotenv |
-| Xác thực | OAuth2 Password Flow + JWT (PyJWT), băm mật khẩu bằng bcrypt |
+| Xác thực | OAuth2 Password Flow, JWT access token + refresh token (rotation, thu hồi được), bcrypt |
 | Cache | Redis |
 | Email (dev) | Mailpit (SMTP giả lập, có giao diện web) |
 | Test | pytest + TestClient + SQLite in-memory + fakeredis |
@@ -61,10 +61,19 @@ Tất cả dùng chung mật khẩu **`Password123`**.
 
 Đăng nhập trên Swagger: bấm nút **Authorize**, nhập username/password (hoặc email/password).
 
+Phiên đăng nhập gồm 2 token:
+
+- **Access token** (JWT, mặc định 15 phút): gửi trong header `Authorization: Bearer ...`.
+  Không lưu DB nên không thu hồi được, vì vậy để sống ngắn.
+- **Refresh token** (chuỗi ngẫu nhiên, mặc định 7 ngày): DB chỉ lưu SHA-256 của nó.
+  `POST /api/v1/auth/refresh` đổi lấy cặp token mới, token cũ hết dùng được (rotation).
+  Token cũ bị gửi lại lần nữa thì coi như bị lộ: mọi phiên của user bị thu hồi.
+  Logout thu hồi refresh token; đổi mật khẩu thu hồi mọi refresh token của user.
+
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 80 test, khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 92 test, khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 ruff check .    # lint (cấu hình trong pyproject.toml)
 mypy            # kiểm tra kiểu cho app/ và scripts/
@@ -78,7 +87,7 @@ mypy            # kiểm tra kiểu cho app/ và scripts/
 │   ├── main.py              # Tạo app: CORS, middleware log, exception handler, gắn router
 │   ├── config.py            # Đọc cấu hình từ .env (pydantic-settings)
 │   ├── database.py          # engine, SessionLocal, Base, dependency get_db
-│   ├── security.py          # bcrypt hash/verify, tạo/giải mã JWT
+│   ├── security.py          # bcrypt hash/verify, tạo/giải mã JWT, tạo/hash refresh token
 │   ├── dependencies.py      # get_current_user, phân quyền (verify_*), load resource, phân trang
 │   ├── permissions.py       # Quy tắc phân quyền nghiệp vụ (hàm thuần True/False)
 │   ├── core/                # Exception + handler, message lỗi, hằng số, error responses
@@ -136,9 +145,12 @@ Quy ước:
 
 | Method | Endpoint | Quyền | Mục đề |
 |---|---|---|---|
-| POST | `/api/v1/users/register` | Công khai | 4 |
-| POST | `/api/v1/users/login` | Công khai | 4 |
-| GET / PUT | `/api/v1/users/me` | Đã đăng nhập | 4 |
+| POST | `/api/v1/auth/register` | Công khai | 4 |
+| POST | `/api/v1/auth/login` | Công khai (trả access + refresh token) | 4, PL 1 |
+| POST | `/api/v1/auth/refresh` | Có refresh token hợp lệ | PL 1 |
+| POST | `/api/v1/auth/logout` | Có refresh token (idempotent, 204) | PL 1 |
+| GET / PATCH | `/api/v1/users/me` | Đã đăng nhập | 4, PL 2 |
+| PUT | `/api/v1/users/me/password` | Đã đăng nhập, cần mật khẩu hiện tại | PL 2 |
 | GET | `/api/v1/users/me/bookmarks` | Đã đăng nhập (phân trang) | 5 |
 | GET | `/api/v1/users/{username}/profile` | Công khai | 3 |
 | GET | `/api/v1/users` | Admin | 5 |

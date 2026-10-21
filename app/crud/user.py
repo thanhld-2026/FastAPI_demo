@@ -35,8 +35,6 @@ def create(db: Session, data: UserCreate, *, role: UserRole = UserRole.MEMBER) -
 
 def update(db: Session, user: User, data: UserUpdate) -> User:
     values = data.model_dump(exclude_unset=True)
-    if "password" in values:
-        user.hashed_password = hash_password(values.pop("password"))
     if "email" in values:
         values["email"] = values["email"].lower()
     for field, value in values.items():
@@ -44,6 +42,11 @@ def update(db: Session, user: User, data: UserUpdate) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+def set_password(user: User, password: str) -> None:
+    """Đổi hash mật khẩu, KHÔNG commit (service commit cùng việc thu hồi các phiên đăng nhập)."""
+    user.hashed_password = hash_password(password)
 
 
 def admin_update(db: Session, user: User, data: AdminUserUpdate) -> User:

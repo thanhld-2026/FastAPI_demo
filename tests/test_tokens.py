@@ -1,4 +1,4 @@
-"""Phụ lục feature 1: refresh token (rotation), logout."""
+"""Phụ lục feature 1-2: refresh token (rotation), logout, đổi mật khẩu."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -6,12 +6,13 @@ from sqlalchemy import select, update
 
 from app import crud
 from app.config import settings
-from app.models import RefreshToken
+from app.models import RefreshToken, User
 from app.security import hash_token
 from tests.conftest import DEFAULT_PASSWORD
 
 REFRESH_URL = "/api/v1/auth/refresh"
 LOGOUT_URL = "/api/v1/auth/logout"
+PASSWORD_URL = "/api/v1/users/me/password"
 
 
 def _refresh(client, refresh_token: str):
@@ -129,3 +130,57 @@ def test_logout_only_ends_that_session(client, make_user):
 
     assert _refresh(client, other_device["refresh_token"]).status_code == 200
 
+
+# ---------- Đổi mật khẩu ----------
+def test_change_password(client, make_user):
+    alice = make_user("alice")
+
+    resp = client.put(
+        PASSWORD_URL,
+        json={"current_password": DEFAULT_PASSWORD, "new_password": "NewPassword456"},
+        headers=alice["headers"],
+    )
+
+    assert resp.status_code == 204
+    old_login = client.post(
+        "/api/v1/auth/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
+    )
+    new_login = client.post(
+        "/api/v1/auth/login", data={"username": "alice", "password": "NewPassword456"}
+    )
+    assert old_login.status_code == 401
+    assert new_login.status_code == 200
+    # Mọi phiên cũ bị đăng xuất
+    assert _refresh(client, alice["refresh_token"]).status_code == 401
+
+
+def test_change_password_validation(client, db, make_user):
+    alice = make_user("alice")
+    old_hash = db.scalar(select(User.hashed_password).where(User.id == alice["id"]))
+
+    wrong_current = client.put(
+        PASSWORD_URL,
+        json={"current_password": "WrongPass1", "new_password": "NewPassword456"},
+        headers=alice["headers"],
+    )
+    same_as_current = client.put(
+        PASSWORD_URL,
+        json={"current_password": DEFAULT_PASSWORD, "new_password": DEFAULT_PASSWORD},
+        headers=alice["headers"],
+    )
+    too_short = client.put(
+        PASSWORD_URL,
+        json={"current_password": DEFAULT_PASSWORD, "new_password": "short"},
+        headers=alice["headers"],
+    )
+    anonymous = client.put(
+        PASSWORD_URL, json={"current_password": DEFAULT_PASSWORD, "new_password": "NewPassword456"}
+    )
+
+    assert wrong_current.status_code == 400  # không phải 401: phiên đăng nhập vẫn hợp lệ
+    assert same_as_current.status_code == 422
+    assert too_short.status_code == 422
+    assert anonymous.status_code == 401
+    db.expire_all()
+    assert db.scalar(select(User.hashed_password).where(User.id == alice["id"])) == old_hash
+    assert _refresh(client, alice["refresh_token"]).status_code == 200  # phiên vẫn còn
