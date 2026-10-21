@@ -64,7 +64,7 @@ Tất cả dùng chung mật khẩu **`Password123`**.
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 76 test, khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 80 test, khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 ruff check .    # lint (cấu hình trong pyproject.toml)
 mypy            # kiểm tra kiểu cho app/ và scripts/

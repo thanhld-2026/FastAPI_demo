@@ -48,7 +48,7 @@ class UserCreate(InputSchema):
 
 
 class UserUpdate(InputSchema):
-    """PUT /api/users/me: chỉ cập nhật những field client gửi lên (exclude_unset)."""
+    """PUT /api/v1/users/me: chỉ cập nhật những field client gửi lên (exclude_unset)."""
 
     email: EmailStr | None = None
     full_name: str | None = Field(default=None, max_length=FULL_NAME_MAX_LENGTH)

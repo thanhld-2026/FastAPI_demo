@@ -1,5 +1,5 @@
+from sqlalchemy import Select, exists, func, insert, select
 from sqlalchemy import delete as sql_delete
-from sqlalchemy import exists, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -29,15 +29,17 @@ TASK_LOAD_OPTIONS = (
 )
 
 
+def _select_task(task_id: int) -> Select[Task]:
+    return select(Task).where(Task.id == task_id).options(*TASK_LOAD_OPTIONS)
+
+
 def get(db: Session, task_id: int) -> Task | None:
-    stmt = select(Task).where(Task.id == task_id).options(*TASK_LOAD_OPTIONS)
-    return db.scalar(stmt)
+    return db.scalar(_select_task(task_id))
 
 
 def _reload(db: Session, task_id: int) -> Task:
     """Đọc lại task vừa ghi (chắc chắn tồn tại) kèm eager loading để trả về response."""
-    stmt = select(Task).where(Task.id == task_id).options(*TASK_LOAD_OPTIONS)
-    return db.scalars(stmt).one()
+    return db.scalars(_select_task(task_id)).one()
 
 
 def get_for_update(db: Session, task_id: int) -> Task | None:
