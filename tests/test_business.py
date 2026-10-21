@@ -48,6 +48,21 @@ def test_non_manager_cannot_assign_task(client, make_user, setup_task):
     assert resp.status_code == 403
 
 
+
+def test_reassigning_same_user_does_not_log_activity(client, make_user, setup_task):
+    pm, _, task = setup_task
+    dev = make_user("dev")
+    url = f"/api/tasks/{task['id']}/assign"
+
+    client.post(url, json={"assignee_id": dev["id"]}, headers=pm["headers"])
+    again = client.post(url, json={"assignee_id": dev["id"]}, headers=pm["headers"])
+    activities = client.get(f"/api/tasks/{task['id']}/activities").json()["items"]
+
+    assert again.status_code == 200
+    assert again.json()["assignee"]["username"] == "dev"
+    # Không đổi người nhận -> không ghi thêm activity (giống update khi không có gì thay đổi)
+    assert [a["action"] for a in activities] == ["created", "assigned"]
+
 def test_admin_can_assign_and_unassign(client, make_user, setup_task):
     _, creator, task = setup_task
     admin = make_user("boss", admin=True)

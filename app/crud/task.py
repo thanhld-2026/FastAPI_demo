@@ -14,6 +14,7 @@ from app.models import (
     User,
     task_bookmarks,
 )
+from app.schemas.common import PageParams
 from app.schemas.task import TaskCreate, TaskUpdate
 
 # Eager loading dùng chung cho mọi query trả về TaskOut.
@@ -54,8 +55,7 @@ def exists_by_id(db: Session, task_id: int) -> bool:
 def list_tasks(
     db: Session,
     *,
-    skip: int,
-    limit: int,
+    pagination: PageParams,
     project_id: int | None = None,
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
@@ -82,8 +82,8 @@ def list_tasks(
         .where(*conditions)
         .options(*TASK_LOAD_OPTIONS)
         .order_by(Task.id.desc())
-        .offset(skip)
-        .limit(limit)
+        .offset(pagination.skip)
+        .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total
 
@@ -132,10 +132,12 @@ def assign(db: Session, *, task: Task, assignee: User | None, actor: User) -> Ta
     1. Cập nhật tasks.assignee_id
     2. Ghi lịch sử vào task_activities
 
-    Nếu bước 2 lỗi -> rollback cả bước 1, không bao giờ có trạng thái
-    "task đã đổi người nhận nhưng không có lịch sử".
+    Chỉ commit 1 lần ở cuối: bước 2 lỗi thì chưa có gì được commit, dependency get_db
+    rollback -> không bao giờ có trạng thái "task đã đổi người nhận nhưng không có lịch sử".
+    Assign lại đúng người hiện tại thì không ghi gì (giống update khi không có field nào đổi).
     """
-    try:
+    new_assignee_id = assignee.id if assignee else None
+    if task.assignee_id != new_assignee_id:
         task.assignee = assignee
         activity_crud.add(
             db,
@@ -145,9 +147,6 @@ def assign(db: Session, *, task: Task, assignee: User | None, actor: User) -> Ta
             detail=f"assigned to {assignee.username}" if assignee else "unassigned",
         )
         db.commit()
-    except Exception:
-        db.rollback()
-        raise
     return get(db, task.id)
 
 
@@ -181,7 +180,7 @@ def remove_bookmark(db: Session, *, user_id: int, task_id: int) -> None:
 
 
 def list_bookmarked(
-    db: Session, user_id: int, *, skip: int, limit: int
+    db: Session, user_id: int, pagination: PageParams
 ) -> tuple[list[Task], int]:
     total = db.scalar(
         select(func.count()).select_from(task_bookmarks).where(task_bookmarks.c.user_id == user_id)
@@ -192,7 +191,7 @@ def list_bookmarked(
         .where(task_bookmarks.c.user_id == user_id)
         .options(*TASK_LOAD_OPTIONS)
         .order_by(task_bookmarks.c.created_at.desc(), Task.id.desc())
-        .offset(skip)
-        .limit(limit)
+        .offset(pagination.skip)
+        .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total

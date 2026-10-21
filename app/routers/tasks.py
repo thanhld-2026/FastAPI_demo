@@ -4,9 +4,7 @@ from fastapi import APIRouter, Query, status
 from pydantic import PositiveInt
 
 from app import crud
-from app.core import messages
 from app.core.constants import TASK_SEARCH_MAX_LENGTH
-from app.core.exceptions import BadRequestException
 from app.core.responses import error_responses
 from app.dependencies import (
     AssignableTask,
@@ -22,6 +20,7 @@ from app.dependencies import (
 from app.models import TaskPriority, TaskStatus
 from app.schemas.common import Page
 from app.schemas.task import ActivityOut, BookmarkOut, TaskAssign, TaskOut, TaskUpdate
+from app.services import tasks as task_service
 
 router = APIRouter(prefix="/api/tasks", tags=["Tasks"])
 
@@ -46,8 +45,7 @@ def list_tasks(
         project_id=project_id,
         assignee_id=assignee_id,
         search=q,
-        skip=pagination.skip,
-        limit=pagination.limit,
+        pagination=pagination,
     )
     return Page.build(items, total, pagination)
 
@@ -87,12 +85,9 @@ def delete_task(task: DeletableTask, db: DbSession):
     responses=error_responses(400, 401, 403, 404),
 )
 def assign_task(data: TaskAssign, task: AssignableTask, current_user: CurrentUser, db: DbSession):
-    assignee = None
-    if data.assignee_id is not None:
-        assignee = crud.user.get_by_id(db, data.assignee_id)
-        if assignee is None or not assignee.is_active:
-            raise BadRequestException(messages.ASSIGNEE_NOT_FOUND)
-    return crud.task.assign(db, task=task, assignee=assignee, actor=current_user)
+    return task_service.assign_task(
+        db, task=task, assignee_id=data.assignee_id, actor=current_user
+    )
 
 
 @router.post(
@@ -126,7 +121,5 @@ def unbookmark_task(task_id: ExistingTaskId, current_user: CurrentUser, db: DbSe
     responses=error_responses(404),
 )
 def list_activities(task_id: ExistingTaskId, db: DbSession, pagination: Pagination):
-    items, total = crud.activity.list_for_task(
-        db, task_id, skip=pagination.skip, limit=pagination.limit
-    )
+    items, total = crud.activity.list_for_task(db, task_id, pagination)
     return Page.build(items, total, pagination)

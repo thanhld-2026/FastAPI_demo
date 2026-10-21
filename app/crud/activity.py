@@ -2,6 +2,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import ActivityAction, Task, TaskActivity, User
+from app.schemas.common import PageParams
 
 
 def add(
@@ -18,7 +19,7 @@ def add(
 
 
 def list_for_task(
-    db: Session, task_id: int, *, skip: int, limit: int
+    db: Session, task_id: int, pagination: PageParams
 ) -> tuple[list[TaskActivity], int]:
     total = db.scalar(
         select(func.count()).select_from(TaskActivity).where(TaskActivity.task_id == task_id)
@@ -28,7 +29,7 @@ def list_for_task(
         .where(TaskActivity.task_id == task_id)
         .options(joinedload(TaskActivity.actor))
         .order_by(TaskActivity.id)
-        .offset(skip)
-        .limit(limit)
+        .offset(pagination.skip)
+        .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total

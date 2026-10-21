@@ -98,9 +98,7 @@ def update_me(data: UserUpdate, current_user: CurrentUser, db: DbSession):
     responses=error_responses(401, 403),
 )
 def my_bookmarks(current_user: CurrentUser, db: DbSession, pagination: Pagination):
-    items, total = crud.task.list_bookmarked(
-        db, current_user.id, skip=pagination.skip, limit=pagination.limit
-    )
+    items, total = crud.task.list_bookmarked(db, current_user.id, pagination)
     return Page.build(items, total, pagination)
 
 
@@ -113,7 +111,7 @@ def my_bookmarks(current_user: CurrentUser, db: DbSession, pagination: Paginatio
     responses=error_responses(401, 403),
 )
 def list_users(db: DbSession, pagination: Pagination):
-    items, total = crud.user.list_users(db, skip=pagination.skip, limit=pagination.limit)
+    items, total = crud.user.list_users(db, pagination)
     return Page.build(items, total, pagination)
 
 

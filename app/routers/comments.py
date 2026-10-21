@@ -12,7 +12,7 @@ from app.dependencies import (
 )
 from app.schemas.comment import CommentCreate, CommentOut, CommentUpdate
 from app.schemas.common import Page
-from app.services import email as email_service
+from app.services import comments as comment_service
 
 router = APIRouter(prefix="/api/tasks/{task_id}/comments", tags=["Comments"])
 
@@ -24,9 +24,7 @@ router = APIRouter(prefix="/api/tasks/{task_id}/comments", tags=["Comments"])
     responses=error_responses(404),
 )
 def list_comments(task_id: ExistingTaskId, db: DbSession, pagination: Pagination):
-    items, total = crud.comment.list_for_task(
-        db, task_id, skip=pagination.skip, limit=pagination.limit
-    )
+    items, total = crud.comment.list_for_task(db, task_id, pagination)
     return Page.build(items, total, pagination)
 
 
@@ -44,31 +42,9 @@ def create_comment(
     db: DbSession,
     background_tasks: BackgroundTasks,
 ):
-    # Người nhận: người tạo task + người được assign (trừ chính người comment).
-    # Lấy dữ liệu thuần TRƯỚC khi commit (sau commit các object bị expire).
-    recipients = sorted(
-        {
-            user.email
-            for user in (task.creator, task.assignee)
-            if user is not None and user.id != current_user.id and user.is_active
-        }
+    return comment_service.create_comment(
+        db, task=task, author=current_user, data=data, background_tasks=background_tasks
     )
-    task_id, task_title, commenter = task.id, task.title, current_user.username
-
-    comment = crud.comment.create(db, task=task, author=current_user, data=data)
-
-    if recipients:
-        # add_task chỉ đăng ký việc cần làm; FastAPI chạy nó SAU KHI đã trả response
-        # -> client không phải chờ gửi mail (có thể mất vài giây).
-        background_tasks.add_task(
-            email_service.notify_new_comment,
-            recipients,
-            task_id=task_id,
-            task_title=task_title,
-            commenter=commenter,
-            content=data.content,
-        )
-    return comment
 
 
 @router.put(
