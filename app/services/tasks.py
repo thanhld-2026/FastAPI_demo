@@ -27,8 +27,9 @@ def assign_task(db: Session, *, task: Task, assignee_id: int | None, actor: User
 def set_task_label(
     db: Session, *, task: Task, label_id: int, attached: bool, actor: User
 ) -> Task:
-    """Label trên URL phải thuộc đúng project của task, nếu không coi như không tồn tại (404)."""
-    label = crud.label.get(db, label_id)
-    if label is None or label.project_id != task.project_id:
+    """Label trên URL phải thuộc đúng project của task, nếu không coi như không tồn tại (404).
+    Khóa chia sẻ label trước (không bị xóa giữa chừng), sau đó crud khóa task."""
+    label = crud.label.get_in_project(db, task.project_id, label_id, for_share=True)
+    if label is None:
         raise NotFoundException(messages.LABEL_NOT_FOUND)
     return crud.task.set_label(db, task=task, label=label, attached=attached, actor=actor)

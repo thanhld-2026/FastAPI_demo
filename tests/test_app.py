@@ -1,6 +1,7 @@
 """Mục 8: Health check, CORS, request id, xử lý lỗi toàn cục."""
 
 from app import crud
+from app.config import Settings
 
 
 def test_health(client):
@@ -66,3 +67,11 @@ def test_unhandled_error_returns_generic_500(client, make_user, make_project, mo
     # Response 500 vẫn đi qua CORS + middleware log -> FE đọc được lỗi và request id
     assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"
     assert resp.headers["X-Request-ID"] == "req-500"
+
+
+def test_old_tags_cache_ttl_setting_is_still_read(monkeypatch):
+    """Biến môi trường đổi tên (tag -> label): .env cũ vẫn dùng được, không bị bỏ qua âm thầm."""
+    monkeypatch.delenv("LABELS_CACHE_TTL", raising=False)
+    monkeypatch.setenv("TAGS_CACHE_TTL", "42")
+
+    assert Settings(_env_file=None).LABELS_CACHE_TTL == 42

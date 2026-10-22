@@ -1,8 +1,12 @@
 """Phụ lục feature 6: label theo project, gắn / gỡ label cho task."""
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import update
+
+from app.models import Task
 
 
 @dataclass
@@ -62,6 +66,17 @@ def test_label_name_is_unique_per_project(client, make_project, make_label, setu
 
     assert duplicate.status_code == 409
     assert same_name_elsewhere.status_code == 201  # 2 project khác nhau có thể cùng tên
+
+
+def test_label_names_ignore_case(client, setup):
+    url = _labels_url(setup.project)
+    headers = setup.owner["headers"]
+
+    created = client.post(url, json={"name": " Bug "}, headers=headers)
+    duplicate = client.post(url, json={"name": "BUG"}, headers=headers)
+
+    assert created.json()["name"] == "bug"  # cắt khoảng trắng + chữ thường
+    assert duplicate.status_code == 409
 
 
 def test_label_input_is_validated(client, setup):
@@ -156,3 +171,50 @@ def test_labels_of_archived_project_are_read_only(client, make_label, make_task,
 
     assert [r.status_code for r in writes] == [409] * len(writes)
     assert client.get(_labels_url(setup.project), headers=headers).status_code == 200
+
+
+def test_deleting_label_is_logged_on_each_task(client, db, make_label, make_task, setup):
+    label = make_label(setup.project, setup.owner, "bug")
+    tasks = [
+        make_task(setup.project["id"], setup.owner, title=title, label_ids=[label["id"]])
+        for title in ("A", "B")
+    ]
+    untouched = make_task(setup.project["id"], setup.owner, title="C")
+    long_ago = datetime(2020, 1, 1, tzinfo=UTC)
+    db.execute(update(Task).values(updated_at=long_ago))
+    db.commit()
+
+    client.delete(f"/api/v1/labels/{label['id']}", headers=setup.editor["headers"])
+
+    def last(task: dict) -> tuple[str | None, bool]:
+        url = f"/api/v1/tasks/{task['id']}"
+        headers = setup.owner["headers"]
+        activity = client.get(f"{url}/activities", headers=headers).json()["items"][-1]
+        changed = datetime.fromisoformat(client.get(url, headers=headers).json()["updated_at"])
+        return activity["detail"], changed > long_ago
+
+    assert [last(task) for task in tasks] == [("removed label bug (label deleted)", True)] * 2
+    assert last(untouched) == (None, False)
+
+
+def test_changing_labels_updates_task_timestamp(client, db, make_label, make_task, setup):
+    label = make_label(setup.project, setup.owner, "bug")
+    task = make_task(setup.project["id"], setup.owner)
+    url = f"/api/v1/tasks/{task['id']}"
+    long_ago = datetime(2020, 1, 1, tzinfo=UTC)
+
+    def updated_after(action) -> bool:
+        db.execute(update(Task).values(updated_at=long_ago))
+        db.commit()
+        action()
+        body = client.get(url, headers=setup.owner["headers"]).json()
+        return datetime.fromisoformat(body["updated_at"]) > long_ago
+
+    headers = setup.editor["headers"]
+    attach = updated_after(lambda: client.post(f"{url}/labels/{label['id']}", headers=headers))
+    detach = updated_after(lambda: client.delete(f"{url}/labels/{label['id']}", headers=headers))
+    via_put = updated_after(
+        lambda: client.put(url, json={"label_ids": [label["id"]]}, headers=headers)
+    )
+
+    assert (attach, detach, via_put) == (True, True, True)

@@ -5,10 +5,11 @@ from app.schemas.common import InputSchema, ORMSchema, reject_null_fields
 
 
 class _LabelColorMixin:
-    @field_validator("color", check_fields=False)
+    @field_validator("name", "color", check_fields=False)
     @classmethod
     def _lowercase(cls, value: str | None) -> str | None:
-        # "#EF4444" và "#ef4444" là 1 màu -> lưu 1 dạng
+        # "Bug" / "bug", "#EF4444" / "#ef4444" là 1 -> lưu 1 dạng (khoảng trắng 2 đầu đã được
+        # InputSchema cắt), để UNIQUE (project_id, name) chặn được trùng tên khác hoa thường
         return value.lower() if value is not None else None
 
 

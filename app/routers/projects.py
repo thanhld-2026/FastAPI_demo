@@ -21,6 +21,7 @@ from app.models import ProjectStatus, TaskPriority, TaskStatus
 from app.schemas.common import Page
 from app.schemas.project import ProjectDetail, ProjectOut, ProjectUpdate
 from app.schemas.task import TaskCreate, TaskOut
+from app.services import labels as label_service
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
@@ -79,7 +80,9 @@ def update_project(data: ProjectUpdate, project: ChangeableProject, db: DbSessio
     responses=error_responses(401, 403, 404, 409),
 )
 def delete_project(project: ChangeableProject, db: DbSession):
+    project_id = project.id
     crud.project.delete(db, project)
+    label_service.invalidate_cache(project_id, project_deleted=True)
 
 
 @router.post(

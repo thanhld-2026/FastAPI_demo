@@ -1,7 +1,13 @@
 from fastapi import APIRouter, Response, status
 
 from app.core.responses import error_responses
-from app.dependencies import DbSession, EditableLabel, EditableProject, ReadableProject
+from app.dependencies import (
+    CurrentUser,
+    DbSession,
+    EditableLabel,
+    EditableProject,
+    ReadableProject,
+)
 from app.schemas.label import LabelCreate, LabelOut, LabelUpdate
 from app.services import labels as label_service
 
@@ -45,8 +51,8 @@ def update_label(data: LabelUpdate, label: EditableLabel, db: DbSession):
 @router.delete(
     "/labels/{label_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="[EDITOR] Xóa label (tự gỡ khỏi các task)",
+    summary="[EDITOR] Xóa label (tự gỡ khỏi các task, có ghi activity cho từng task)",
     responses=error_responses(401, 403, 404, 409),
 )
-def delete_label(label: EditableLabel, db: DbSession):
-    label_service.delete_label(db, label)
+def delete_label(label: EditableLabel, current_user: CurrentUser, db: DbSession):
+    label_service.delete_label(db, label, actor=current_user)

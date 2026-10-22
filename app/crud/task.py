@@ -1,5 +1,6 @@
 from sqlalchemy import ColumnElement, Select, exists, func, insert, select
 from sqlalchemy import delete as sql_delete
+from sqlalchemy import update as sql_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -15,6 +16,7 @@ from app.models import (
     TaskStatus,
     User,
     task_bookmarks,
+    task_labels,
 )
 from app.schemas.common import PageParams
 from app.schemas.task import TaskCreate, TaskUpdate
@@ -133,9 +135,47 @@ def create(
     return _reload(db, task.id)
 
 
+def lock_label_set(db: Session, task: Task) -> None:
+    """Khóa dòng task (SELECT ... FOR NO KEY UPDATE) rồi đọc lại tập label: các request cùng
+    gắn / gỡ label của 1 task chạy lần lượt. Không khóa thì 2 request cùng gắn 1 label -> INSERT
+    trùng khóa chính, cùng gỡ -> ORM DELETE không trúng dòng nào (StaleDataError) -> 500.
+
+    NO KEY UPDATE thay vì UPDATE: không chặn request khác thêm comment / activity cho task.
+    Thứ tự khóa luôn là label (FOR SHARE) trước, task sau, giống lúc xóa label -> không deadlock.
+    """
+    db.execute(select(Task.id).where(Task.id == task.id).with_for_update(key_share=True))
+    db.expire(task, ["labels"])
+
+
+def lock_tasks_with_label(db: Session, label_id: int) -> list[Task]:
+    """Task đang gắn label (khóa theo thứ tự id: 2 request khóa nhiều task không chờ vòng nhau)."""
+    stmt = (
+        select(Task)
+        .join(task_labels, task_labels.c.task_id == Task.id)
+        .where(task_labels.c.label_id == label_id)
+        .order_by(Task.id)
+        .with_for_update(key_share=True, of=Task)
+    )
+    return list(db.scalars(stmt).all())
+
+
+def touch(db: Session, task_ids: list[int]) -> None:
+    """Đổi label chỉ ghi vào bảng task_labels, không sửa cột nào của tasks nên `onupdate` của
+    updated_at không chạy -> tự cập nhật."""
+    if task_ids:
+        db.execute(
+            sql_update(Task)
+            .where(Task.id.in_(task_ids))
+            .values(updated_at=func.now())
+            .execution_options(synchronize_session=False)
+        )
+
+
 def update(
     db: Session, task: Task, data: TaskUpdate, *, labels: list[Label] | None, actor: User
 ) -> Task:
+    if labels is not None:
+        lock_label_set(db, task)
     values = data.model_dump(exclude_unset=True, exclude={"label_ids"})
     changed = [field for field, value in values.items() if getattr(task, field) != value]
     for field, value in values.items():
@@ -143,6 +183,7 @@ def update(
     if labels is not None and {lb.id for lb in task.labels} != {lb.id for lb in labels}:
         task.labels = labels
         changed.append("labels")
+        touch(db, [task.id])
 
     if changed:
         activity_crud.add(
@@ -187,13 +228,15 @@ def assign(db: Session, *, task: Task, assignee: User | None, actor: User) -> Ta
 
 
 def set_label(db: Session, *, task: Task, label: Label, attached: bool, actor: User) -> Task:
-    """Gắn / gỡ 1 label + ghi activity trong 1 commit. Idempotent: đã đúng trạng thái thì
-    không ghi gì (giống update khi không có field nào đổi)."""
+    """Gắn / gỡ 1 label + ghi activity + cập nhật updated_at trong 1 commit. Idempotent: đã đúng
+    trạng thái thì không ghi gì (giống update khi không có field nào đổi)."""
+    lock_label_set(db, task)
     if (label in task.labels) != attached:
         if attached:
             task.labels.append(label)
         else:
             task.labels.remove(label)
+        touch(db, [task.id])
         verb = "added" if attached else "removed"
         activity_crud.add(
             db,

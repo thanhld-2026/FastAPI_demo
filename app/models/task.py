@@ -58,7 +58,7 @@ class Task(TimestampMixin, Base):
     )
     # Many-to-Many
     labels: Mapped[list[Label]] = relationship(
-        secondary=task_labels, back_populates="tasks", order_by="Label.name"
+        secondary=task_labels, back_populates="tasks", order_by="Label.name", passive_deletes=True
     )
     bookmarked_by: Mapped[list[User]] = relationship(
         secondary=task_bookmarks, back_populates="bookmarked_tasks"

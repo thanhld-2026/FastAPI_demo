@@ -6,8 +6,10 @@ import fakeredis
 import pytest
 import redis
 
-from app import cache
+from app import cache, crud
+from app.models import Label
 from app.services import email as email_service
+from app.services import labels as label_service
 
 
 # ---------- Background tasks ----------
@@ -135,7 +137,54 @@ def test_labels_are_cached_per_project_and_invalidated_on_change(
     assert third.headers["X-Cache"] == "MISS"
     assert [lb["name"] for lb in third.json()] == ["backend", "frontend"]
     assert other_again.headers["X-Cache"] == "HIT"  # project khác không bị ảnh hưởng
-    assert fake_redis.ttl(f"taskhub:projects:{project['id']}:labels") > 0  # cache có thời hạn
+    data_keys = fake_redis.keys(f"taskhub:projects:{project['id']}:labels:v[0-9]*")
+    assert data_keys and all(fake_redis.ttl(key) > 0 for key in data_keys)  # cache có thời hạn
+
+
+def test_slow_reader_cannot_put_old_labels_back_into_cache(
+    client, db, make_user, make_project, make_label, fake_redis, monkeypatch
+):
+    """Request A đọc DB (danh sách cũ), trong lúc đó B thêm label + làm mới cache, rồi A mới ghi
+    cache: dữ liệu cũ của A không được che mất label của B ở các lần đọc sau."""
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    make_label(project, pm, "backend")
+    url = f"/api/v1/projects/{project['id']}/labels"
+    original = crud.label.list_for_project
+
+    def slow_read(session, project_id):
+        labels = original(session, project_id)  # A đọc xong danh sách cũ...
+        db.add(Label(project_id=project_id, name="frontend", color="#000000"))
+        db.commit()
+        label_service.invalidate_cache(project_id)  # ...thì B thêm label, commit, làm mới cache
+        return labels
+
+    monkeypatch.setattr(crud.label, "list_for_project", slow_read)
+    stale = client.get(url, headers=pm["headers"])
+    monkeypatch.setattr(crud.label, "list_for_project", original)
+    fresh = client.get(url, headers=pm["headers"])
+
+    assert [lb["name"] for lb in stale.json()] == ["backend"]
+    assert fresh.headers["X-Cache"] == "MISS"
+    assert [lb["name"] for lb in fresh.json()] == ["backend", "frontend"]
+
+
+def test_deleted_project_leaves_no_label_cache_behind(
+    client, make_user, make_project, make_label, fake_redis
+):
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    make_label(project, pm, "old")
+    url = f"/api/v1/projects/{project['id']}/labels"
+    client.get(url, headers=pm["headers"])  # nạp cache
+
+    client.delete(f"/api/v1/projects/{project['id']}", headers=pm["headers"])
+    # SQLite cấp lại id vừa xóa cho project mới: cache cũ mà còn thì project mới thấy label "old"
+    reborn = make_project(pm, name="New", workspace={"id": project["workspace_id"]})
+    resp = client.get(f"/api/v1/projects/{reborn['id']}/labels", headers=pm["headers"])
+
+    assert reborn["id"] == project["id"]
+    assert (resp.headers["X-Cache"], resp.json()) == ("MISS", [])
 
 
 def test_labels_work_without_redis(client, make_user, make_project, make_label):

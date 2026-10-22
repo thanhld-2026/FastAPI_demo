@@ -38,7 +38,6 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id', name=op.f('pk_labels')),
     sa.UniqueConstraint('project_id', 'name', name='uq_labels_project_id_name')
     )
-    op.create_index(op.f('ix_labels_project_id'), 'labels', ['project_id'], unique=False)
     op.create_table('task_labels',
     sa.Column('task_id', sa.Integer(), nullable=False),
     sa.Column('label_id', sa.Integer(), nullable=False),
@@ -98,5 +97,4 @@ def downgrade() -> None:
     """)
     op.drop_index(op.f('ix_task_labels_label_id'), table_name='task_labels')
     op.drop_table('task_labels')
-    op.drop_index(op.f('ix_labels_project_id'), table_name='labels')
     op.drop_table('labels')

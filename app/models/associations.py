@@ -10,6 +10,9 @@ from app.database import Base
 from app.models.base import UTCDateTime
 
 # Task <-> Label: 1 task có nhiều label, 1 label gắn cho nhiều task (cùng project)
+# Giới hạn đã biết: "label phải cùng project với task" chỉ được kiểm tra trong code
+# (get_labels_by_ids, set_task_label), DB không chặn. Muốn DB chặn thì thêm cột project_id vào
+# task_labels + khóa ngoại kép (task_id, project_id) -> tasks, (label_id, project_id) -> labels.
 task_labels = Table(
     "task_labels",
     Base.metadata,

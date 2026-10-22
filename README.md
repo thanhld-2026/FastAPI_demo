@@ -79,7 +79,7 @@ Phiên đăng nhập gồm 2 token:
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 112 test (+4 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 118 test (+6 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 # Test khóa dòng (FOR SHARE / FOR UPDATE) cần PostgreSQL thật, DB rỗng dành riêng cho test:
 TEST_POSTGRES_URL=postgresql+psycopg://taskhub:taskhub@localhost:5432/taskhub_test pytest -m postgres
@@ -157,8 +157,11 @@ Quy ước:
   response có `total` và `pages` (tổng số trang, tối thiểu 1). `page` vượt quá `pages` trả
   `items` rỗng. Tham số cũ `skip` bị từ chối (422) để client cũ không âm thầm nhận mãi trang 1.
 - Task: status `TODO` / `IN_PROGRESS` / `IN_REVIEW` / `DONE`, priority `LOW` / `MEDIUM` / `HIGH` / `URGENT`.
-- Label thuộc từng project (tên + màu hex), chỉ gắn được label của đúng project chứa task.
-  Danh sách label được cache Redis theo project; thêm / sửa / xóa label thì xóa cache của project đó.
+- Label thuộc từng project (tên lưu chữ thường, không trùng trong project + màu hex), chỉ gắn
+  được label của đúng project chứa task. Gắn / gỡ label cập nhật `updated_at` của task và ghi
+  activity; xóa label thì ghi activity cho từng task đang dùng nó.
+  Danh sách label được cache Redis theo project, có version: thêm / sửa / xóa label (hoặc xóa
+  project) thì tăng version của project đó, cache cũ không bao giờ được đọc lại.
 - Project: `ACTIVE` / `ARCHIVED`. Project đã archive thì chính project, task và comment bên trong
   chỉ đọc được (mọi thao tác ghi trả `409`), OWNER / Admin unarchive để mở lại.
 - Cột "Mục đề": số mục của tutorial; `PL n` là feature n trong phụ lục đặc tả sample app.
@@ -213,3 +216,6 @@ Lỗi luôn trả về dạng `{"detail": "..."}`, mã lỗi của từng endpoi
 - `409`: trùng dữ liệu (email, tên label, thành viên) hoặc xung đột trạng thái
   (project đã archive, xóa workspace còn project).
 - `422`: dữ liệu sai định dạng.
+
+Giới hạn đã biết: quy tắc "label phải cùng project với task" mới được kiểm tra trong code, DB
+chưa chặn (cần thêm `project_id` vào `task_labels` + khóa ngoại kép, xem `app/models/associations.py`).
