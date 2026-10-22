@@ -210,3 +210,17 @@ def test_filter_projects_by_status(client, make_user, make_project):
     assert [p["name"] for p in active["items"]] == ["Active one"]
     assert [p["name"] for p in archived["items"]] == ["Old one"]
     assert client.get("/api/v1/projects", params={"status": "DELETED"}).status_code == 422
+
+
+def test_missing_comment_on_archived_project_is_404(client, make_user, make_project, make_task):
+    """Thứ tự lỗi 404 -> 409: comment không tồn tại thì báo 404 kể cả khi project đã archive."""
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    task = make_task(project["id"], pm)
+    client.post(f"/api/v1/projects/{project['id']}/archive", headers=pm["headers"])
+
+    resp = client.put(
+        f"/api/v1/tasks/{task['id']}/comments/999", json={"content": "x"}, headers=pm["headers"]
+    )
+
+    assert resp.status_code == 404

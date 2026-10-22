@@ -109,7 +109,7 @@ TagDep = Annotated[Tag, Depends(get_existing_tag)]
 # ---------- Load resource để GHI: project phải đang ACTIVE ----------
 # Quy ước: endpoint ghi vào project / task / comment chỉ dùng các dependency trong phần này
 # (hoặc các dependency phân quyền dựng trên chúng); endpoint đọc dùng ProjectDep / TaskDep.
-# Nhờ vậy quy tắc "project đã archive thì chỉ đọc" chỉ nằm ở _ensure_project_writable.
+# Nhờ vậy quy tắc "project đã archive thì chỉ đọc" chỉ nằm ở _raise_if_not_writable.
 def _raise_if_not_writable(status: ProjectStatus | None, not_found_message: str) -> None:
     if status is None:  # không tồn tại / vừa bị xóa bởi request khác
         raise NotFoundException(not_found_message)
@@ -117,14 +117,22 @@ def _raise_if_not_writable(status: ProjectStatus | None, not_found_message: str)
         raise ConflictException(messages.PROJECT_ARCHIVED)
 
 
-def _ensure_project_writable(db: Session, project_id: int, *, exclusive: bool = False) -> None:
-    status = crud.project.lock_status(db, project_id, exclusive=exclusive)
-    _raise_if_not_writable(status, messages.PROJECT_NOT_FOUND)
+def _ensure_project_writable(db: Session, project_id: int, not_found_message: str) -> None:
+    """Khóa chia sẻ dòng project (FOR SHARE) và kiểm tra project còn ACTIVE."""
+    _raise_if_not_writable(crud.project.lock_status(db, project_id), not_found_message)
+
+
+def _lock_project(db: Session, project_id: int) -> Project:
+    """Khóa độc quyền + đọc lại dòng project (dùng khi sắp sửa / xóa chính dòng đó)."""
+    project = crud.project.get_for_update(db, project_id)
+    if project is None:  # vừa bị xóa bởi request khác
+        raise NotFoundException(messages.PROJECT_NOT_FOUND)
+    return project
 
 
 def get_writable_project(project: ProjectDep, db: DbSession) -> Project:
     """Project nhận thêm dữ liệu (vd tạo task): khóa chia sẻ dòng project."""
-    _ensure_project_writable(db, project.id)
+    _ensure_project_writable(db, project.id, messages.PROJECT_NOT_FOUND)
     return project
 
 
@@ -132,8 +140,8 @@ WritableProject = Annotated[Project, Depends(get_writable_project)]
 
 
 def get_writable_task(task: TaskDep, db: DbSession) -> Task:
-    """Task được sửa / xóa / assign / comment: project chứa nó phải đang ACTIVE."""
-    _ensure_project_writable(db, task.project_id)
+    """Task được sửa / xóa / comment: project chứa nó phải đang ACTIVE."""
+    _ensure_project_writable(db, task.project_id, messages.TASK_NOT_FOUND)
     return task
 
 
@@ -141,7 +149,7 @@ WritableTask = Annotated[Task, Depends(get_writable_task)]
 
 
 def get_writable_task_id(task_id: int, db: DbSession) -> int:
-    """Như WritableTask nhưng chỉ cần task_id (sửa / xóa comment): 1 query, không load cả task."""
+    """Như WritableTask nhưng chỉ cần task_id (assign): 1 query, không load cả task."""
     _raise_if_not_writable(crud.task.lock_project_status(db, task_id), messages.TASK_NOT_FOUND)
     return task_id
 
@@ -167,20 +175,31 @@ def _require_project_manager(user: User, project: Project) -> None:
         raise ForbiddenException(messages.PROJECT_MANAGER_REQUIRED)
 
 
-def verify_project_manager(user: CurrentUser, project: ProjectDep) -> Project:
-    """Archive / unarchive: chỉ PM (owner) của project hoặc admin, ở trạng thái nào cũng được."""
+def verify_project_manager(user: CurrentUser, project: ProjectDep, db: DbSession) -> Project:
+    """Archive / unarchive: chỉ PM (owner) của project hoặc admin, ở trạng thái nào cũng được.
+
+    Kiểm tra quyền trước, rồi mới khóa độc quyền + đọc lại: archive / unarchive / xóa chạy song
+    song sẽ xếp hàng thay vì ghi đè nhau (hoặc lỗi 500 khi dòng vừa bị xóa).
+    """
     _require_project_manager(user, project)
-    return project
+    return _lock_project(db, project.id)
 
 
 ManagedProject = Annotated[Project, Depends(verify_project_manager)]
 
 
 def get_project_for_change(user: CurrentUser, project: ProjectDep, db: DbSession) -> Project:
-    """Sửa / xóa project: khóa độc quyền dòng project, project phải ACTIVE, user là PM / admin."""
-    _ensure_project_writable(db, project.id, exclusive=True)
+    """Sửa / xóa project: project phải ACTIVE, user là PM / admin.
+
+    409 / 403 được kiểm tra trên bản đọc thường (chưa khóa) để người không có quyền không chiếm
+    được khóa độc quyền của project người khác; qua được mới khóa + đọc lại và kiểm tra lại status
+    (có thể vừa bị archive trong lúc chờ khóa).
+    """
+    _raise_if_not_writable(project.status, messages.PROJECT_NOT_FOUND)
     _require_project_manager(user, project)
-    return project
+    locked = _lock_project(db, project.id)
+    _raise_if_not_writable(locked.status, messages.PROJECT_NOT_FOUND)
+    return locked
 
 
 ChangeableProject = Annotated[Project, Depends(get_project_for_change)]
@@ -206,10 +225,11 @@ def verify_task_deleter(user: CurrentUser, task: WritableTask) -> Task:
 DeletableTask = Annotated[Task, Depends(verify_task_deleter)]
 
 
-def get_task_for_assign(user: CurrentUser, task: WritableTask, db: DbSession) -> Task:
-    """Khóa thêm dòng task (SELECT ... FOR UPDATE) tới hết transaction rồi mới kiểm tra quyền:
-    2 PM assign cùng 1 task cùng lúc thì request sau phải chờ request trước commit xong."""
-    locked = crud.task.get_for_update(db, task.id)
+def get_task_for_assign(user: CurrentUser, task_id: WritableTaskId, db: DbSession) -> Task:
+    """Khóa dòng task (SELECT ... FOR UPDATE) tới hết transaction rồi mới kiểm tra quyền:
+    2 PM assign cùng 1 task cùng lúc thì request sau phải chờ request trước commit xong.
+    Dùng WritableTaskId (1 query) thay vì WritableTask: task sẽ được đọc lại khi khóa."""
+    locked = crud.task.get_for_update(db, task_id)
     if locked is None:  # task vừa bị xóa bởi request khác
         raise NotFoundException(messages.TASK_NOT_FOUND)
     if not permissions.can_manage_project(user, locked.project):
@@ -221,13 +241,15 @@ AssignableTask = Annotated[Task, Depends(get_task_for_assign)]
 
 
 def verify_comment_modifier(
-    user: CurrentUser, task_id: WritableTaskId, comment_id: int, db: DbSession
+    user: CurrentUser, task_id: int, comment_id: int, db: DbSession
 ) -> Comment:
     """Chỉ tác giả comment, PM của project hoặc admin mới được sửa / xóa.
-    Lọc theo cả task_id để chặn truy cập chéo: /tasks/1/comments/<id comment của task 2>."""
+    Lọc theo cả task_id để chặn truy cập chéo: /tasks/1/comments/<id comment của task 2>.
+    Tìm comment (404) trước khi kiểm tra archive (409), đúng thứ tự 404 -> 409 -> 403."""
     comment = crud.comment.get(db, task_id=task_id, comment_id=comment_id)
     if comment is None:
         raise NotFoundException(messages.COMMENT_NOT_FOUND)
+    _raise_if_not_writable(crud.task.lock_project_status(db, task_id), messages.TASK_NOT_FOUND)
     if not permissions.can_modify_comment(user, comment):
         raise ForbiddenException(messages.COMMENT_MODIFY_FORBIDDEN)
     return comment

@@ -28,6 +28,19 @@ def lock_status(db: Session, project_id: int, *, exclusive: bool = False) -> Pro
     return db.scalar(stmt)
 
 
+def get_for_update(db: Session, project_id: int) -> Project | None:
+    """SELECT ... FOR UPDATE + đọc lại (populate_existing): request sắp ghi lên chính dòng project
+    phải làm việc trên dữ liệu mới nhất, không phải bản đã load trước khi có khóa. Nếu không,
+    request đến sau có thể so với bản cũ, thấy "không đổi gì" và bỏ qua UPDATE (mất cập nhật)."""
+    stmt = (
+        select(Project)
+        .where(Project.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return db.scalar(stmt)
+
+
 def get_detail(db: Session, project_id: int) -> Project | None:
     """Project + owner + tasks + assignee của từng task.
 
