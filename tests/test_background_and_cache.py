@@ -50,6 +50,26 @@ def test_comment_notifies_task_creator_and_assignee(
     assert "Please review" in sent_emails[0]["body"]
 
 
+def test_comment_does_not_notify_users_who_left_the_workspace(
+    client, make_user, make_project, make_task, add_member, sent_emails
+):
+    pm = make_user("pmuser")
+    creator = make_user("creator")
+    project = make_project(pm)
+    add_member(project, pm, creator)
+    task = make_task(project["id"], creator)
+    client.delete(
+        f"/api/v1/workspaces/{project['workspace_id']}/members/{creator['id']}",
+        headers=creator["headers"],
+    )
+
+    client.post(
+        f"/api/v1/tasks/{task['id']}/comments", json={"content": "Note"}, headers=pm["headers"]
+    )
+
+    assert sent_emails == []  # đã rời workspace thì không nhận nội dung task nữa
+
+
 def test_commenter_does_not_notify_themselves(
     client, make_user, make_project, make_task, sent_emails
 ):

@@ -1,8 +1,9 @@
 from fastapi import APIRouter, status
+from sqlalchemy.exc import IntegrityError
 
 from app import crud, permissions
 from app.core import messages
-from app.core.exceptions import ForbiddenException
+from app.core.exceptions import ForbiddenException, NotFoundException
 from app.core.responses import error_responses
 from app.dependencies import (
     CurrentUser,
@@ -46,9 +47,7 @@ def create_workspace(data: WorkspaceCreate, current_user: CurrentUser, db: DbSes
     responses=error_responses(401, 403),
 )
 def list_workspaces(current_user: CurrentUser, db: DbSession, pagination: Pagination):
-    items, total = crud.workspace.list_for_user(
-        db, current_user, pagination, include_all=permissions.is_admin(current_user)
-    )
+    items, total = crud.workspace.list_for_user(db, current_user, pagination)
     return Page.build(items, total, pagination)
 
 
@@ -103,10 +102,15 @@ def invite_member(data: MemberInvite, workspace: OwnedWorkspace, db: DbSession):
     responses=error_responses(400, 401, 403, 404),
 )
 def change_member_role(
-    user_id: int, data: MemberRoleUpdate, workspace: OwnedWorkspace, db: DbSession
+    user_id: int,
+    data: MemberRoleUpdate,
+    current_user: CurrentUser,
+    workspace: OwnedWorkspace,
+    db: DbSession,
 ):
+    """Hạ xuống VIEWER thì task người đó đang làm (project ACTIVE) được bỏ assign."""
     return workspace_service.change_member_role(
-        db, workspace=workspace, user_id=user_id, role=data.role
+        db, workspace=workspace, user_id=user_id, role=data.role, actor=current_user
     )
 
 
@@ -136,4 +140,9 @@ def remove_member(
 def create_project(
     data: ProjectCreate, current_user: CurrentUser, workspace: OwnedWorkspace, db: DbSession
 ):
-    return crud.project.create(db, data, workspace=workspace, creator=current_user)
+    try:
+        return crud.project.create(db, data, workspace=workspace, creator=current_user)
+    except IntegrityError:
+        # Workspace vừa bị xóa bởi request khác: FK workspace_id không còn
+        db.rollback()
+        raise NotFoundException(messages.WORKSPACE_NOT_FOUND) from None

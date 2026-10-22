@@ -1,7 +1,7 @@
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.crud.workspace import member_workspace_ids
+from app.crud.workspace import visible_to
 from app.models import Project, ProjectStatus, Task, User, Workspace
 from app.schemas.common import PageParams
 from app.schemas.project import ProjectCreate, ProjectUpdate
@@ -11,20 +11,26 @@ def get(db: Session, project_id: int) -> Project | None:
     return db.get(Project, project_id)
 
 
-def lock_status(db: Session, project_id: int, *, exclusive: bool = False) -> ProjectStatus | None:
-    """Đọc status của project và khóa dòng project tới hết transaction.
-
-    - exclusive=False -> SELECT ... FOR SHARE: các request ghi task / comment cùng giữ được,
-      nhưng archive (UPDATE dòng project) phải chờ chúng commit; request đến sau archive thì
-      chờ archive commit rồi đọc được status mới -> không ghi lọt vào project đã archive.
-    - exclusive=True -> SELECT ... FOR UPDATE: dùng khi chính request sẽ sửa / xóa dòng project.
-      Nếu 2 request cùng giữ FOR SHARE rồi cùng UPDATE dòng đó thì sẽ deadlock.
-    Trả về None nếu project không còn. (SQLite không hỗ trợ, SQLAlchemy tự bỏ qua mệnh đề này.)
+def lock_status(db: Session, project_id: int) -> ProjectStatus | None:
+    """Đọc status của project, khóa chia sẻ dòng project (SELECT ... FOR SHARE) tới hết
+    transaction: các request ghi task / comment cùng giữ được, nhưng archive (UPDATE dòng project)
+    phải chờ chúng commit; request đến sau archive thì chờ archive commit rồi đọc được status mới
+    -> không ghi lọt vào project đã archive. Request sửa / xóa chính dòng project dùng
+    get_for_update. Trả về None nếu project không còn. (SQLite bỏ qua mệnh đề khóa.)
     """
+    stmt = select(Project.status).where(Project.id == project_id).with_for_update(read=True)
+    return db.scalar(stmt)
+
+
+def get_for_update(db: Session, project_id: int) -> Project | None:
+    """SELECT ... FOR UPDATE + đọc lại (populate_existing): request sắp ghi lên chính dòng project
+    phải làm việc trên dữ liệu mới nhất, không phải bản đã load trước khi có khóa. Nếu không,
+    request đến sau có thể so với bản cũ, thấy "không đổi gì" và bỏ qua UPDATE (mất cập nhật)."""
     stmt = (
-        select(Project.status)
+        select(Project)
         .where(Project.id == project_id)
-        .with_for_update(read=not exclusive)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     return db.scalar(stmt)
 
@@ -54,14 +60,11 @@ def list_projects(
     pagination: PageParams,
     *,
     viewer: User,
-    include_all: bool = False,
     status: ProjectStatus | None = None,
     workspace_id: int | None = None,
 ) -> tuple[list[Project], int]:
-    """Project trong các workspace `viewer` là thành viên (`include_all` cho admin)."""
-    conditions: list[ColumnElement[bool]] = []
-    if not include_all:
-        conditions.append(Project.workspace_id.in_(member_workspace_ids(viewer.id)))
+    """Project trong các workspace `viewer` là thành viên (admin: tất cả)."""
+    conditions = [visible_to(viewer, Project.workspace_id)]
     if status is not None:
         conditions.append(Project.status == status)
     if workspace_id is not None:

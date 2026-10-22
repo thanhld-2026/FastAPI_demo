@@ -9,8 +9,7 @@ from app.schemas.task import TaskBrief
 
 class UserProfile(ORMSchema):
     id: int
-    username: str
-    full_name: str | None
+    full_name: str
     bio: str | None
     created_at: datetime
     created_projects: list[ProjectBrief]

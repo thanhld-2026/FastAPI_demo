@@ -52,14 +52,15 @@ uvicorn app.main:app --reload           # http://localhost:8000/docs
 
 Tất cả dùng chung mật khẩu **`Password123`**.
 
-| Username | Workspace **Backend Team** (project TaskHub Backend, task 1–6) | Workspace **Mobile Team** (project TaskHub Mobile, task 7–9) |
+| Email | Workspace **Backend Team** (project TaskHub Backend, task 1–6) | Workspace **Mobile Team** (project TaskHub Mobile, task 7–9) |
 |---|---|---|
-| `admin` | Admin hệ thống: làm được mọi thứ ở mọi workspace | |
-| `alice` | OWNER | không phải thành viên |
-| `bob` | VIEWER | OWNER |
-| `carol`, `dave` | EDITOR | EDITOR |
+| `admin@example.com` | Admin hệ thống: làm được mọi thứ ở mọi workspace | |
+| `alice@example.com` | OWNER | không phải thành viên |
+| `bob@example.com` | VIEWER | OWNER |
+| `carol@example.com`, `dave@example.com` | EDITOR | EDITOR |
 
-Đăng nhập trên Swagger: bấm nút **Authorize**, nhập username/password (hoặc email/password).
+Đăng nhập bằng **email** (theo đặc tả, user không có username). Trên Swagger bấm **Authorize**,
+ô `username` của form OAuth2 nhập email (tên field do chuẩn OAuth2 quy định).
 
 Phiên đăng nhập gồm 2 token:
 
@@ -67,14 +68,21 @@ Phiên đăng nhập gồm 2 token:
   Không lưu DB nên không thu hồi được, vì vậy để sống ngắn.
 - **Refresh token** (chuỗi ngẫu nhiên, mặc định 7 ngày): DB chỉ lưu SHA-256 của nó.
   `POST /api/v1/auth/refresh` đổi lấy cặp token mới, token cũ hết dùng được (rotation).
-  Token cũ bị gửi lại lần nữa thì coi như bị lộ: mọi phiên của user bị thu hồi.
-  Logout thu hồi refresh token; đổi mật khẩu thu hồi mọi refresh token của user.
+  Các token nối tiếp nhau tạo thành 1 chuỗi = 1 phiên đăng nhập trên 1 thiết bị.
+  Token cũ bị gửi lại sau thời gian ân hạn (`REFRESH_TOKEN_REUSE_GRACE_SECONDS`, mặc định 10 giây)
+  thì coi như bị lộ: **cả chuỗi của phiên đó** bị thu hồi, phiên khác không ảnh hưởng.
+  Gửi lại trong thời gian ân hạn (retry, 2 tab cùng refresh) chỉ nhận 401.
+- Logout (kể cả bằng token cũ đã bị đổi) kết thúc cả phiên đó. Đổi mật khẩu thu hồi mọi phiên
+  và trả cặp token mới cho thiết bị hiện tại. Admin khóa tài khoản cũng thu hồi mọi phiên.
+- Refresh / logout / đổi mật khẩu / khóa tài khoản của cùng 1 user chạy tuần tự (khóa dòng user).
 
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 105 test, khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 112 test (+4 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
+# Test khóa dòng (FOR SHARE / FOR UPDATE) cần PostgreSQL thật, DB rỗng dành riêng cho test:
+TEST_POSTGRES_URL=postgresql+psycopg://taskhub:taskhub@localhost:5432/taskhub_test pytest -m postgres
 ruff check .    # lint (cấu hình trong pyproject.toml)
 mypy            # kiểm tra kiểu cho app/ và scripts/
 ```
@@ -141,8 +149,9 @@ Quy ước:
   - Admin hệ thống làm được mọi thứ ở mọi workspace.
 - Không phải thành viên → `404` (không lộ resource có tồn tại hay không); là thành viên nhưng role
   không đủ → `403`. Thứ tự lỗi: 401 → 404 → 409 (project đã archive) → 403.
-- Chỉ giao task cho thành viên từ `EDITOR` trở lên. Xóa thành viên thì các task của họ trong
-  workspace được bỏ assign (có ghi activity).
+- Chỉ giao task cho thành viên từ `EDITOR` trở lên. Thành viên rời / bị xóa khỏi workspace hoặc
+  bị hạ xuống `VIEWER` thì task của họ trong các project `ACTIVE` được bỏ assign (có ghi activity);
+  project đã archive giữ nguyên. Email báo comment chỉ gửi cho người còn trong workspace.
 - Mọi API nằm dưới prefix `/api/v1`.
 - Danh sách phân trang bằng `page` (1 tới 10 000) + `limit` (mặc định 20, tối đa 100),
   response có `total` và `pages` (tổng số trang, tối thiểu 1). `page` vượt quá `pages` trả
@@ -161,9 +170,9 @@ Quy ước:
 | POST | `/api/v1/auth/refresh` | Có refresh token hợp lệ | PL 1 |
 | POST | `/api/v1/auth/logout` | Có refresh token (idempotent, 204) | PL 1 |
 | GET / PATCH | `/api/v1/users/me` | Đã đăng nhập | 4, PL 2 |
-| PUT | `/api/v1/users/me/password` | Đã đăng nhập, cần mật khẩu hiện tại | PL 2 |
+| PUT | `/api/v1/users/me/password` | Đã đăng nhập, cần mật khẩu hiện tại (trả cặp token mới) | PL 2 |
 | GET | `/api/v1/users/me/bookmarks` | Đã đăng nhập (phân trang) | 5 |
-| GET | `/api/v1/users/{username}/profile` | Đã đăng nhập (chỉ hiện dữ liệu ở workspace chung) | 3 |
+| GET | `/api/v1/users/{user_id}/profile` | Đã đăng nhập (chỉ hiện dữ liệu ở workspace chung) | 3 |
 | GET | `/api/v1/users` | Admin | 5 |
 | PATCH | `/api/v1/users/{user_id}` | Admin (đổi role, khóa tài khoản) | 5 |
 | POST | `/api/v1/workspaces` | Đã đăng nhập (người tạo là OWNER) | PL 3 |
@@ -201,6 +210,6 @@ Lỗi luôn trả về dạng `{"detail": "..."}`, mã lỗi của từng endpoi
 - `403`: là thành viên nhưng role không đủ (hoặc tài khoản bị khóa).
 - `404`: resource trên URL không tồn tại, hoặc không phải thành viên workspace chứa nó.
 - `400`: body tham chiếu tới dữ liệu không tồn tại (label_ids, assignee_id, email được mời).
-- `409`: trùng dữ liệu (username, email, tên label, thành viên) hoặc xung đột trạng thái
+- `409`: trùng dữ liệu (email, tên label, thành viên) hoặc xung đột trạng thái
   (project đã archive, xóa workspace còn project).
 - `422`: dữ liệu sai định dạng.

@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, status
 from pydantic import PositiveInt
 
-from app import crud, permissions
+from app import crud
 from app.core import messages
 from app.core.exceptions import NotFoundException
 from app.core.responses import error_responses
@@ -43,7 +43,6 @@ def list_projects(
         db,
         pagination,
         viewer=current_user,
-        include_all=permissions.is_admin(current_user),
         status=project_status,
         workspace_id=workspace_id,
     )
@@ -121,8 +120,7 @@ def list_project_tasks(
 ):
     items, total = crud.task.list_tasks(
         db,
-        viewer=current_user,
-        include_all=True,  # ReadableProject đã kiểm tra quyền đọc project này
+        viewer=None,  # ReadableProject đã kiểm tra quyền đọc project này
         project_id=project.id,
         status=task_status,
         priority=priority,

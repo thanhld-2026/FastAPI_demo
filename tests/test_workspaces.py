@@ -15,8 +15,8 @@ def test_create_workspace_makes_creator_owner(client, make_user):
 
     body = resp.json()
     assert resp.status_code == 201
-    assert body["owner"]["username"] == "alice"
-    assert [(m["user"]["username"], m["role"]) for m in body["members"]] == [("alice", "OWNER")]
+    assert body["owner"]["full_name"] == "alice"
+    assert [(m["user"]["full_name"], m["role"]) for m in body["members"]] == [("alice", "OWNER")]
     assert client.post(WS_URL, json={"name": "X"}).status_code == 401
 
 
@@ -81,7 +81,7 @@ def test_invite_member(client, make_user, make_workspace):
     )
 
     assert invited.status_code == 201
-    assert (invited.json()["user"]["username"], invited.json()["role"]) == ("carol", "EDITOR")
+    assert (invited.json()["user"]["full_name"], invited.json()["role"]) == ("carol", "EDITOR")
     assert by_editor.status_code == 403
     assert by_stranger.status_code == 404
     assert duplicate.status_code == 409
@@ -128,7 +128,7 @@ def test_remove_member_and_leave(client, make_user, make_workspace, add_member):
     assert owner_removes_carol.status_code == 204
     assert owner_leaves.status_code == 400  # OWNER không rời được workspace của mình
     members = client.get(f"{WS_URL}/{workspace['id']}", headers=owner["headers"]).json()["members"]
-    assert [m["user"]["username"] for m in members] == ["owner"]
+    assert [m["user"]["full_name"] for m in members] == ["owner"]
     assert client.get(f"{WS_URL}/{workspace['id']}", headers=carol["headers"]).status_code == 404
 
 
@@ -155,7 +155,48 @@ def test_removing_member_unassigns_their_tasks(
         f"/api/v1/tasks/{task['id']}/activities", headers=owner["headers"]
     ).json()["items"]
     assert after["assignee"] is None
-    assert activities[-1]["detail"] == "unassigned (carol left the workspace)"
+    assert activities[-1]["detail"] == "unassigned (carol was removed from the workspace)"
+
+
+def test_leaving_or_demoted_to_viewer_unassigns_tasks_of_active_projects(
+    client, make_user, make_project, make_task, add_member
+):
+    owner = make_user("owner")
+    carol = make_user("carol")
+    dave = make_user("dave")
+    project = make_project(owner)
+    workspace = {"id": project["workspace_id"]}
+    old_project = make_project(owner, name="Old", workspace=workspace)
+    add_member(project, owner, carol)
+    add_member(project, owner, dave)
+    carol_task = make_task(project["id"], owner, title="Carol task")
+    dave_task = make_task(project["id"], owner, title="Dave task")
+    dave_old_task = make_task(old_project["id"], owner, title="Dave old task")
+    for task, user in ((carol_task, carol), (dave_task, dave), (dave_old_task, dave)):
+        client.post(
+            f"/api/v1/tasks/{task['id']}/assign",
+            json={"assignee_id": user["id"]},
+            headers=owner["headers"],
+        )
+    client.post(f"/api/v1/projects/{old_project['id']}/archive", headers=owner["headers"])
+    members_url = f"{WS_URL}/{workspace['id']}/members"
+
+    left = client.delete(f"{members_url}/{carol['id']}", headers=carol["headers"])
+    demoted = client.patch(
+        f"{members_url}/{dave['id']}", json={"role": "VIEWER"}, headers=owner["headers"]
+    )
+
+    def last_activity(task: dict) -> tuple[str | None, str | None]:
+        url = f"/api/v1/tasks/{task['id']}"
+        current = client.get(url, headers=owner["headers"]).json()
+        detail = client.get(f"{url}/activities", headers=owner["headers"]).json()["items"][-1]
+        return (current["assignee"] or {}).get("full_name"), detail["detail"]
+
+    assert (left.status_code, demoted.status_code) == (204, 200)
+    assert last_activity(carol_task) == (None, "unassigned (carol left the workspace)")
+    assert last_activity(dave_task) == (None, "unassigned (dave is now VIEWER)")
+    # Project đã archive là chỉ đọc: giữ nguyên người làm task
+    assert last_activity(dave_old_task) == ("dave", "assigned to dave")
 
 
 # ---------- Dữ liệu không lộ sang workspace khác ----------

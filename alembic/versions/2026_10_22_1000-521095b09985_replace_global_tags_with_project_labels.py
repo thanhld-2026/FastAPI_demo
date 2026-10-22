@@ -6,9 +6,9 @@ trước task_tags đang có FK trỏ tới tags -> PostgreSQL báo lỗi). Dữ
 mỗi (project, tag) đang được task trong project dùng -> 1 label của project đó, giữ nguyên
 việc gắn nhãn của từng task.
 
-Revision ID: 0f4b723bef78
-Revises: 126fb5b2a771
-Create Date: 2026-10-21 17:38:54.975203
+Revision ID: 521095b09985
+Revises: 3d8d26fb2b01
+Create Date: 2026-10-22 10:00:53.204117
 
 """
 from typing import Sequence, Union
@@ -18,8 +18,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '0f4b723bef78'
-down_revision: Union[str, Sequence[str], None] = '126fb5b2a771'
+revision: str = '521095b09985'
+down_revision: Union[str, Sequence[str], None] = '3d8d26fb2b01'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

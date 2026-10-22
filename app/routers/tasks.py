@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, status
 from pydantic import PositiveInt
 
-from app import crud, permissions
+from app import crud
 from app.core.constants import TASK_SEARCH_MAX_LENGTH
 from app.core.responses import error_responses
 from app.dependencies import (
@@ -47,7 +47,6 @@ def list_tasks(
     items, total = crud.task.list_tasks(
         db,
         viewer=current_user,
-        include_all=permissions.is_admin(current_user),
         status=task_status,
         priority=priority,
         project_id=project_id,

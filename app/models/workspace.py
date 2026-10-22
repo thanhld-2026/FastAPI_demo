@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import WORKSPACE_NAME_MAX_LENGTH
 from app.database import Base
-from app.models.base import TimestampMixin, enum_column
+from app.models.base import TimestampMixin, UTCDateTime, enum_column
 from app.models.enums import WorkspaceRole
 
 if TYPE_CHECKING:
@@ -30,7 +30,11 @@ class Workspace(TimestampMixin, Base):
     members: Mapped[list[WorkspaceMember]] = relationship(
         back_populates="workspace", cascade="all, delete-orphan", order_by="WorkspaceMember.user_id"
     )
-    projects: Mapped[list[Project]] = relationship(back_populates="workspace")
+    # passive_deletes="all": ORM không tự load / sửa project khi xóa workspace, để FK RESTRICT
+    # trong DB quyết định (không thì ORM thử set workspace_id = NULL cho project còn sót)
+    projects: Mapped[list[Project]] = relationship(
+        back_populates="workspace", passive_deletes="all"
+    )
 
 
 class WorkspaceMember(Base):
@@ -49,7 +53,7 @@ class WorkspaceMember(Base):
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
     )
     role: Mapped[WorkspaceRole] = mapped_column(enum_column(WorkspaceRole))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
 
     workspace: Mapped[Workspace] = relationship(back_populates="members")
     user: Mapped[User] = relationship()

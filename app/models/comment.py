@@ -19,7 +19,10 @@ class Comment(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     content: Mapped[str] = mapped_column(Text)
     task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
-    author_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # SET NULL: xóa user thì comment vẫn còn (giữ ngữ cảnh thảo luận), tác giả hiện là "đã xóa"
+    author_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
 
     task: Mapped[Task] = relationship(back_populates="comments")
-    author: Mapped[User] = relationship(back_populates="comments")
+    author: Mapped[User | None] = relationship(back_populates="comments")

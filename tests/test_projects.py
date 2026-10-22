@@ -23,7 +23,7 @@ def test_create_project_requires_owner_of_workspace(
     assert by_editor.status_code == 403
     assert by_owner.status_code == 201
     assert by_owner.json()["workspace_id"] == workspace["id"]
-    assert by_owner.json()["creator"]["username"] == "owner"
+    assert by_owner.json()["creator"]["full_name"] == "owner"
 
 
 def test_get_project_detail_requires_membership(client, make_user, make_project, add_member):
@@ -85,9 +85,9 @@ def test_project_detail_contains_nested_tasks_with_assignee(
 
     detail = client.get(f"/api/v1/projects/{project['id']}", headers=dev["headers"]).json()
 
-    assert detail["creator"]["username"] == "owner"
+    assert detail["creator"]["full_name"] == "owner"
     assert detail["tasks"][0]["title"] == "Design DB"
-    assert detail["tasks"][0]["assignee"]["username"] == "dev"
+    assert detail["tasks"][0]["assignee"]["full_name"] == "dev"
 
 
 def test_only_workspace_owner_or_admin_can_update_project(
@@ -141,9 +141,10 @@ def test_user_profile_only_shows_shared_workspaces(
         headers=owner["headers"],
     )
 
-    owner_profile = client.get("/api/v1/users/owner/profile", headers=dev["headers"]).json()
-    dev_profile = client.get("/api/v1/users/dev/profile", headers=dev["headers"]).json()
-    seen_by_outsider = client.get("/api/v1/users/dev/profile", headers=outsider["headers"]).json()
+    owner_url, dev_url = (f"/api/v1/users/{user['id']}/profile" for user in (owner, dev))
+    owner_profile = client.get(owner_url, headers=dev["headers"]).json()
+    dev_profile = client.get(dev_url, headers=dev["headers"]).json()
+    seen_by_outsider = client.get(dev_url, headers=outsider["headers"]).json()
 
     assert [p["name"] for p in owner_profile["created_projects"]] == ["Mobile App"]
     assert owner_profile["created_projects"][0]["status"] == "ACTIVE"
@@ -151,8 +152,8 @@ def test_user_profile_only_shows_shared_workspaces(
     assert "email" not in dev_profile  # profile không lộ email
     # Người ngoài workspace không thấy task / project trong workspace đó qua profile
     assert seen_by_outsider["assigned_tasks"] == []
-    assert client.get("/api/v1/users/dev/profile").status_code == 401
-    assert client.get("/api/v1/users/ghost/profile", headers=dev["headers"]).status_code == 404
+    assert client.get(dev_url).status_code == 401
+    assert client.get("/api/v1/users/999/profile", headers=dev["headers"]).status_code == 404
 
 
 # ---------- Archive ----------
@@ -251,6 +252,20 @@ def test_error_order_on_archived_project(client, make_user, make_project, make_t
     assert not_archived_viewer.status_code == 403
     codes = (anonymous, missing, by_stranger, by_viewer)
     assert [r.status_code for r in codes] == [401, 404, 404, 409]
+
+
+def test_missing_comment_on_archived_project_is_404(client, make_user, make_project, make_task):
+    """Thứ tự lỗi 404 -> 409: comment không tồn tại thì báo 404 kể cả khi project đã archive."""
+    owner = make_user("owner")
+    project = make_project(owner)
+    task = make_task(project["id"], owner)
+    client.post(f"/api/v1/projects/{project['id']}/archive", headers=owner["headers"])
+
+    resp = client.put(
+        f"/api/v1/tasks/{task['id']}/comments/999", json={"content": "x"}, headers=owner["headers"]
+    )
+
+    assert resp.status_code == 404
 
 
 def test_filter_projects_by_status(client, make_user, make_project):
