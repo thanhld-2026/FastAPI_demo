@@ -7,7 +7,9 @@ from datetime import date, timedelta
 
 from sqlalchemy import select, update
 
+from app.core.constants import MAX_PAGE
 from app.models import Task
+from app.schemas.common import Page, PageParams
 from tests.conftest import DEFAULT_PASSWORD
 
 
@@ -166,6 +168,13 @@ def test_empty_and_out_of_range_pages(client, make_user, make_project, make_task
     assert (len(last["items"]), last["pages"]) == (1, 2)
     assert beyond.status_code == 200
     assert (beyond.json()["items"], beyond.json()["pages"]) == ([], 2)
+
+
+def test_pages_never_exceed_max_page():
+    # page > MAX_PAGE bị 422, nên `pages` cũng không được vượt MAX_PAGE
+    huge = Page.build([], total=10**9, params=PageParams(page=1, limit=1))
+
+    assert huge.pages == MAX_PAGE
 
 
 def test_filter_ids_must_be_positive(client):

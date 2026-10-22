@@ -5,6 +5,7 @@ from typing import Any, Self
 from pydantic import BaseModel, ConfigDict
 
 from app.core import messages
+from app.core.constants import MAX_PAGE
 
 
 class InputSchema(BaseModel):
@@ -42,6 +43,7 @@ class Page[T](BaseModel):
 
     - Không có dữ liệu: `pages` = 1 (trang 1 rỗng), FE không phải hiển thị "trang 1/0".
     - `page` lớn hơn `pages`: trả 200 với `items` rỗng (không coi là lỗi), FE dựa vào `pages`.
+    - `pages` tối đa MAX_PAGE: dữ liệu quá sâu thì phải lọc thêm hoặc tăng `limit`.
     """
 
     items: list[T]
@@ -58,8 +60,9 @@ class Page[T](BaseModel):
             total=total,
             page=params.page,
             limit=params.limit,
-            # Chia làm tròn lên bằng số nguyên (không qua float)
-            pages=max(1, (total + params.limit - 1) // params.limit),
+            # Chia làm tròn lên bằng số nguyên (không qua float); không vượt MAX_PAGE vì
+            # query param page không nhận số lớn hơn (FE duyệt 1..pages sẽ không gặp 422)
+            pages=min(MAX_PAGE, max(1, (total + params.limit - 1) // params.limit)),
         )
 
 
