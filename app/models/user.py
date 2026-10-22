@@ -9,7 +9,6 @@ from app.core.constants import (
     EMAIL_MAX_LENGTH,
     FULL_NAME_MAX_LENGTH,
     PASSWORD_HASH_MAX_LENGTH,
-    USERNAME_MAX_LENGTH,
 )
 from app.database import Base
 from app.models.associations import task_bookmarks
@@ -26,10 +25,11 @@ class User(TimestampMixin, Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] = mapped_column(String(USERNAME_MAX_LENGTH), unique=True, index=True)
+    # Đăng nhập bằng email (theo đặc tả phụ lục, không có username)
     email: Mapped[str] = mapped_column(String(EMAIL_MAX_LENGTH), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(PASSWORD_HASH_MAX_LENGTH))
-    full_name: Mapped[str | None] = mapped_column(String(FULL_NAME_MAX_LENGTH))
+    # Tên hiển thị (trong task, comment, profile...) -> bắt buộc
+    full_name: Mapped[str] = mapped_column(String(FULL_NAME_MAX_LENGTH))
     bio: Mapped[str | None] = mapped_column(Text)
     role: Mapped[UserRole] = mapped_column(
         enum_column(UserRole), default=UserRole.MEMBER, server_default=UserRole.MEMBER.value

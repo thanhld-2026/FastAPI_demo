@@ -15,8 +15,8 @@ def test_create_workspace_makes_creator_owner(client, make_user):
 
     body = resp.json()
     assert resp.status_code == 201
-    assert body["owner"]["username"] == "alice"
-    assert [(m["user"]["username"], m["role"]) for m in body["members"]] == [("alice", "OWNER")]
+    assert body["owner"]["full_name"] == "alice"
+    assert [(m["user"]["full_name"], m["role"]) for m in body["members"]] == [("alice", "OWNER")]
     assert client.post(WS_URL, json={"name": "X"}).status_code == 401
 
 
@@ -81,7 +81,7 @@ def test_invite_member(client, make_user, make_workspace):
     )
 
     assert invited.status_code == 201
-    assert (invited.json()["user"]["username"], invited.json()["role"]) == ("carol", "EDITOR")
+    assert (invited.json()["user"]["full_name"], invited.json()["role"]) == ("carol", "EDITOR")
     assert by_editor.status_code == 403
     assert by_stranger.status_code == 404
     assert duplicate.status_code == 409
@@ -128,7 +128,7 @@ def test_remove_member_and_leave(client, make_user, make_workspace, add_member):
     assert owner_removes_carol.status_code == 204
     assert owner_leaves.status_code == 400  # OWNER không rời được workspace của mình
     members = client.get(f"{WS_URL}/{workspace['id']}", headers=owner["headers"]).json()["members"]
-    assert [m["user"]["username"] for m in members] == ["owner"]
+    assert [m["user"]["full_name"] for m in members] == ["owner"]
     assert client.get(f"{WS_URL}/{workspace['id']}", headers=carol["headers"]).status_code == 404
 
 

@@ -24,17 +24,15 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
     responses=error_responses(409),
 )
 def register(data: UserCreate, db: DbSession):
-    if crud.user.get_by_username(db, data.username):
-        raise ConflictException(messages.USERNAME_TAKEN)
     if crud.user.get_by_email(db, data.email):
         raise ConflictException(messages.EMAIL_TAKEN)
     try:
         return crud.user.create(db, data)
     except IntegrityError:
-        # 2 request đăng ký cùng username gần như đồng thời: cả 2 đều qua bước kiểm tra
+        # 2 request đăng ký cùng email gần như đồng thời: cả 2 đều qua bước kiểm tra
         # ở trên, nhưng UNIQUE constraint trong DB vẫn chặn được request thứ 2.
         db.rollback()
-        raise ConflictException(messages.USERNAME_OR_EMAIL_TAKEN) from None
+        raise ConflictException(messages.EMAIL_TAKEN) from None
 
 
 @router.post(
@@ -44,8 +42,8 @@ def register(data: UserCreate, db: DbSession):
     responses=error_responses(401, 403),
 )
 def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbSession):
-    """Chuẩn OAuth2 Password Flow: gửi **form data** `username` + `password`
-    (field `username` chấp nhận cả username hoặc email)."""
+    """Chuẩn OAuth2 Password Flow: gửi **form data** `username` + `password`.
+    Tên field `username` là bắt buộc theo chuẩn OAuth2, giá trị là **email** của user."""
     return auth_service.login(db, form.username, form.password)
 
 

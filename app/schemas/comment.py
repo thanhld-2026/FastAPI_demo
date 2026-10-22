@@ -21,6 +21,6 @@ class CommentOut(ORMSchema):
     id: int
     content: str
     task_id: int
-    author: UserPublic
+    author: UserPublic | None  # None: tác giả đã bị xóa (comment vẫn được giữ)
     created_at: datetime
     updated_at: datetime

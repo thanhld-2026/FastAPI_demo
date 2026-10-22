@@ -10,9 +10,9 @@ và thêm cột NOT NULL vào bảng đã có dữ liệu -> lỗi). Các bướ
    để không mất quyền truy cập.
 4. projects.workspace_id thành NOT NULL + FK.
 
-Revision ID: 126fb5b2a771
-Revises: f191f4c9226b
-Create Date: 2026-10-21 17:25:33.037031
+Revision ID: 3d8d26fb2b01
+Revises: 50f3714e5988
+Create Date: 2026-10-22 09:50:12.418532
 
 """
 from typing import Sequence, Union
@@ -22,8 +22,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '126fb5b2a771'
-down_revision: Union[str, Sequence[str], None] = 'f191f4c9226b'
+revision: str = '3d8d26fb2b01'
+down_revision: Union[str, Sequence[str], None] = '50f3714e5988'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -63,7 +63,7 @@ def upgrade() -> None:
     op.add_column('projects', sa.Column('workspace_id', sa.Integer(), nullable=True))
     op.execute("""
         INSERT INTO workspaces (name, owner_id)
-        SELECT 'Workspace of ' || u.username, u.id
+        SELECT 'Workspace of ' || u.full_name, u.id
         FROM users u
         WHERE u.id IN (SELECT DISTINCT creator_id FROM projects)
         ORDER BY u.id
@@ -84,6 +84,7 @@ def upgrade() -> None:
             SELECT project_id, creator_id AS user_id FROM tasks
             UNION SELECT project_id, assignee_id FROM tasks WHERE assignee_id IS NOT NULL
             UNION SELECT t.project_id, c.author_id FROM comments c JOIN tasks t ON t.id = c.task_id
+            WHERE c.author_id IS NOT NULL
         ) x
         JOIN projects p ON p.id = x.project_id
         WHERE NOT EXISTS (

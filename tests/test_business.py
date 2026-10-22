@@ -49,12 +49,12 @@ def test_editor_can_assign_task_and_activity_is_logged(client, make_user, add_me
     activities = _activities(client, setup.task, setup.owner)
 
     assert resp.status_code == 200
-    assert resp.json()["assignee"]["username"] == "dev"
+    assert resp.json()["assignee"]["full_name"] == "dev"
     assert [(a["action"], a["detail"]) for a in activities] == [
         ("created", None),
         ("assigned", "assigned to dev"),
     ]
-    assert activities[1]["actor"]["username"] == "creator"
+    assert activities[1]["actor"]["full_name"] == "creator"
 
 
 def test_viewer_cannot_assign_task(client, setup):
@@ -98,7 +98,7 @@ def test_reassigning_same_user_does_not_log_activity(client, setup):
     activities = _activities(client, setup.task, setup.owner)
 
     assert again.status_code == 200
-    assert again.json()["assignee"]["username"] == "creator"
+    assert again.json()["assignee"]["full_name"] == "creator"
     # Không đổi người nhận -> không ghi thêm activity (giống update khi không có gì thay đổi)
     assert [a["action"] for a in activities] == ["created", "assigned"]
 
@@ -110,7 +110,7 @@ def test_admin_can_assign_and_unassign_without_membership(client, make_user, set
     assigned = client.post(url, json={"assignee_id": setup.editor["id"]}, headers=admin["headers"])
     unassigned = client.post(url, json={"assignee_id": None}, headers=admin["headers"])
 
-    assert assigned.json()["assignee"]["username"] == "creator"
+    assert assigned.json()["assignee"]["full_name"] == "creator"
     assert unassigned.status_code == 200
     assert unassigned.json()["assignee"] is None
 
@@ -177,7 +177,7 @@ def test_editor_can_comment_viewer_cannot(client, make_user, setup):
     )
     assert created.status_code == 201
     assert created.json()["content"] == "LGTM!"  # khoảng trắng thừa được cắt
-    assert created.json()["author"]["username"] == "creator"
+    assert created.json()["author"]["full_name"] == "creator"
     assert [c["content"] for c in listed] == ["LGTM!"]
     assert _activities(client, setup.task, setup.owner)[-1]["action"] == "commented"
 

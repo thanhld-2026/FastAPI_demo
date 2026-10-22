@@ -1,14 +1,29 @@
-from sqlalchemy import Select, exists, func, select
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy import ColumnElement, Select, exists, func, select, true
+from sqlalchemy.orm import InstrumentedAttribute, Session, joinedload, selectinload
 
+from app import permissions
 from app.models import Project, Task, User, Workspace, WorkspaceMember, WorkspaceRole
 from app.schemas.common import PageParams
 from app.schemas.workspace import WorkspaceCreate, WorkspaceUpdate
 
 
 def member_workspace_ids(user_id: int) -> Select[int]:
-    """Subquery id các workspace user là thành viên: dùng để lọc danh sách (project, task...)."""
+    """Subquery id các workspace user là thành viên."""
     return select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == user_id)
+
+
+def visible_to(
+    viewer: User | None, workspace_id: InstrumentedAttribute[int]
+) -> ColumnElement[bool]:
+    """Điều kiện lọc dữ liệu (project, task, bookmark, profile...) theo workspace người xem là
+    thành viên. Dùng chung cho mọi danh sách để không chỗ nào quên lọc.
+
+    - viewer=None: tầng trên đã kiểm tra quyền (vd task của 1 project cụ thể) -> không lọc.
+    - Admin hệ thống thấy mọi workspace.
+    """
+    if viewer is None or permissions.is_admin(viewer):
+        return true()
+    return workspace_id.in_(member_workspace_ids(viewer.id))
 
 
 # ---------- Role của user (None = không phải thành viên) ----------
@@ -60,10 +75,10 @@ def get_detail(db: Session, workspace_id: int) -> Workspace | None:
 
 
 def list_for_user(
-    db: Session, user: User, pagination: PageParams, *, include_all: bool
+    db: Session, user: User, pagination: PageParams
 ) -> tuple[list[Workspace], int]:
-    """Workspace user là thành viên; `include_all` (admin) -> mọi workspace."""
-    conditions = [] if include_all else [Workspace.id.in_(member_workspace_ids(user.id))]
+    """Workspace user là thành viên (admin: mọi workspace)."""
+    conditions = [visible_to(user, Workspace.id)]
     total = db.execute(
         select(func.count()).select_from(Workspace).where(*conditions)
     ).scalar_one()

@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.crud import activity as activity_crud
-from app.crud.workspace import member_workspace_ids
+from app.crud.workspace import visible_to
 from app.models import (
     ActivityAction,
     Project,
@@ -74,20 +74,18 @@ def exists_by_id(db: Session, task_id: int) -> bool:
     return bool(db.scalar(select(exists().where(Task.id == task_id))))
 
 
-def _visible_to(viewer_id: int) -> ColumnElement[bool]:
-    """Điều kiện: task thuộc project nằm trong workspace mà viewer là thành viên."""
-    visible_projects = select(Project.id).where(
-        Project.workspace_id.in_(member_workspace_ids(viewer_id))
+def _task_visible_to(viewer: User | None) -> ColumnElement[bool]:
+    """Task thuộc project nằm trong workspace mà viewer là thành viên (xem crud.workspace)."""
+    return Task.project_id.in_(
+        select(Project.id).where(visible_to(viewer, Project.workspace_id))
     )
-    return Task.project_id.in_(visible_projects)
 
 
 def list_tasks(
     db: Session,
     *,
     pagination: PageParams,
-    viewer: User,
-    include_all: bool = False,
+    viewer: User | None,
     project_id: int | None = None,
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
@@ -96,9 +94,10 @@ def list_tasks(
 ) -> tuple[list[Task], int]:
     """Lọc + phân trang. Trả về (danh sách task của trang hiện tại, tổng số task khớp filter).
 
-    Chỉ trả task trong workspace `viewer` là thành viên (`include_all` cho admin).
+    Chỉ trả task trong workspace `viewer` là thành viên; viewer=None khi tầng trên đã kiểm tra
+    quyền đọc (vd danh sách task của 1 project).
     """
-    conditions = [] if include_all else [_visible_to(viewer.id)]
+    conditions = [_task_visible_to(viewer)]
     if project_id is not None:
         conditions.append(Task.project_id == project_id)
     if status is not None:
@@ -179,7 +178,7 @@ def assign(db: Session, *, task: Task, assignee: User | None, actor: User) -> Ta
             task=task,
             actor=actor,
             action=ActivityAction.ASSIGNED,
-            detail=f"assigned to {assignee.username}" if assignee else "unassigned",
+            detail=f"assigned to {assignee.full_name}" if assignee else "unassigned",
         )
         db.commit()
     return _reload(db, task.id)
@@ -214,14 +213,10 @@ def remove_bookmark(db: Session, *, user_id: int, task_id: int) -> None:
     db.commit()
 
 
-def list_bookmarked(
-    db: Session, user: User, pagination: PageParams, *, include_all: bool = False
-) -> tuple[list[Task], int]:
+def list_bookmarked(db: Session, user: User, pagination: PageParams) -> tuple[list[Task], int]:
     """Task user đã bookmark. Bị xóa khỏi workspace thì bookmark vẫn giữ nhưng không hiện ra
     (vào lại workspace thì thấy lại)."""
-    conditions = [task_bookmarks.c.user_id == user.id]
-    if not include_all:
-        conditions.append(_visible_to(user.id))
+    conditions = [task_bookmarks.c.user_id == user.id, _task_visible_to(user)]
     total = db.execute(
         select(func.count())
         .select_from(Task)

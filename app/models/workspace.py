@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import WORKSPACE_NAME_MAX_LENGTH
 from app.database import Base
-from app.models.base import TimestampMixin, enum_column
+from app.models.base import TimestampMixin, UTCDateTime, enum_column
 from app.models.enums import WorkspaceRole
 
 if TYPE_CHECKING:
@@ -49,7 +49,7 @@ class WorkspaceMember(Base):
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True
     )
     role: Mapped[WorkspaceRole] = mapped_column(enum_column(WorkspaceRole))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
 
     workspace: Mapped[Workspace] = relationship(back_populates="members")
     user: Mapped[User] = relationship()

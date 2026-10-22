@@ -46,9 +46,7 @@ def create_workspace(data: WorkspaceCreate, current_user: CurrentUser, db: DbSes
     responses=error_responses(401, 403),
 )
 def list_workspaces(current_user: CurrentUser, db: DbSession, pagination: Pagination):
-    items, total = crud.workspace.list_for_user(
-        db, current_user, pagination, include_all=permissions.is_admin(current_user)
-    )
+    items, total = crud.workspace.list_for_user(db, current_user, pagination)
     return Page.build(items, total, pagination)
 
 

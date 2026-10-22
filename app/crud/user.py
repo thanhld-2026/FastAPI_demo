@@ -1,9 +1,7 @@
-from typing import Any
-
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.crud.workspace import member_workspace_ids
+from app.crud.workspace import visible_to
 from app.models import Project, Task, User, UserRole
 from app.schemas.common import PageParams
 from app.schemas.user import AdminUserUpdate, UserCreate, UserUpdate
@@ -14,17 +12,12 @@ def get_by_id(db: Session, user_id: int) -> User | None:
     return db.get(User, user_id)
 
 
-def get_by_username(db: Session, username: str) -> User | None:
-    return db.scalar(select(User).where(User.username == username))
-
-
 def get_by_email(db: Session, email: str) -> User | None:
     return db.scalar(select(User).where(User.email == email.lower()))
 
 
 def create(db: Session, data: UserCreate, *, role: UserRole = UserRole.MEMBER) -> User:
     user = User(
-        username=data.username,
         email=data.email.lower(),
         full_name=data.full_name,
         hashed_password=hash_password(data.password),  # không bao giờ lưu mật khẩu gốc
@@ -60,11 +53,21 @@ def admin_update(db: Session, user: User, data: AdminUserUpdate) -> User:
     return user
 
 
-def authenticate(db: Session, identifier: str, password: str) -> User | None:
-    """Đăng nhập bằng username HOẶC email. Trả về None nếu sai thông tin."""
-    user = db.scalar(
-        select(User).where(or_(User.username == identifier, User.email == identifier.lower()))
+def get_for_update(db: Session, user_id: int) -> User | None:
+    """SELECT ... FOR UPDATE + đọc lại dòng user: refresh token, đổi mật khẩu, khóa tài khoản của
+    cùng 1 user chạy tuần tự (xem services/auth.py)."""
+    stmt = (
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
+    return db.scalar(stmt)
+
+
+def authenticate(db: Session, email: str, password: str) -> User | None:
+    """Đăng nhập bằng email. Trả về None nếu sai thông tin."""
+    user = get_by_email(db, email)
     if user is None:
         verify_password(password, DUMMY_HASH)  # giữ thời gian phản hồi đồng đều
         return None
@@ -81,35 +84,27 @@ def list_users(db: Session, pagination: PageParams) -> tuple[list[User], int]:
 
 
 def get_profile(
-    db: Session, username: str, *, viewer: User, include_all: bool = False
-) -> dict[str, Any] | None:
-    """Thông tin công khai + project user đã tạo + task user được giao, 3 query cố định.
+    db: Session, user_id: int, *, viewer: User
+) -> tuple[User, list[Project], list[Task]] | None:
+    """User + project user đã tạo + task user được giao (3 query cố định).
 
-    Chỉ liệt kê project / task trong workspace mà `viewer` cũng là thành viên: profile không được
-    làm lộ dữ liệu của workspace người xem không có quyền (`include_all` cho admin).
+    Chỉ liệt kê project / task trong workspace mà `viewer` cũng là thành viên (admin: tất cả):
+    profile không được làm lộ dữ liệu của workspace người xem không có quyền.
     """
-    user = get_by_username(db, username)
+    user = get_by_id(db, user_id)
     if user is None:
         return None
-    projects = select(Project).where(Project.creator_id == user.id).order_by(Project.id)
+    projects = select(Project).where(
+        Project.creator_id == user.id, visible_to(viewer, Project.workspace_id)
+    )
     tasks = (
         select(Task)
-        .where(Task.assignee_id == user.id)
+        .join(Project, Project.id == Task.project_id)
+        .where(Task.assignee_id == user.id, visible_to(viewer, Project.workspace_id))
         .options(joinedload(Task.assignee))
-        .order_by(Task.id)
     )
-    if not include_all:
-        visible = member_workspace_ids(viewer.id)
-        projects = projects.where(Project.workspace_id.in_(visible))
-        tasks = tasks.join(Project, Project.id == Task.project_id).where(
-            Project.workspace_id.in_(visible)
-        )
-    return {
-        "id": user.id,
-        "username": user.username,
-        "full_name": user.full_name,
-        "bio": user.bio,
-        "created_at": user.created_at,
-        "created_projects": list(db.scalars(projects).all()),
-        "assigned_tasks": list(db.scalars(tasks).all()),
-    }
+    return (
+        user,
+        list(db.scalars(projects.order_by(Project.id)).all()),
+        list(db.scalars(tasks.order_by(Task.id)).all()),
+    )

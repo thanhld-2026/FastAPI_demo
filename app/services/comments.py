@@ -30,7 +30,7 @@ def create_comment(
 ) -> Comment:
     # Lấy dữ liệu thuần TRƯỚC khi commit (sau commit các object bị expire)
     recipients = _notification_recipients(task, author)
-    task_id, task_title, commenter = task.id, task.title, author.username
+    task_id, task_title, commenter = task.id, task.title, author.full_name
 
     comment = crud.comment.create(db, task=task, author=author, data=data)
 

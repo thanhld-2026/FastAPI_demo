@@ -11,7 +11,7 @@ from app.models import Task, User
 def assign_task(db: Session, *, task: Task, assignee_id: int | None, actor: User) -> Task:
     """Giao task cho 1 thành viên đang hoạt động, role EDITOR trở lên; `None` là bỏ assign.
 
-    Quyền assign (EDITOR) và khóa dòng task đã được dependency get_task_for_assign xử lý.
+    Quyền assign (EDITOR) và khóa dòng task đã được dependency AssignableTask xử lý.
     """
     assignee = None
     if assignee_id is not None:

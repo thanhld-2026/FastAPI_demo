@@ -134,13 +134,22 @@ ReadableWorkspace = Annotated[Workspace, Depends(workspace_access(WorkspaceRole.
 OwnedWorkspace = Annotated[Workspace, Depends(workspace_access(WorkspaceRole.OWNER))]
 
 
+def _lock_project(db: Session, project_id: int) -> Project:
+    project = crud.project.get_for_update(db, project_id)
+    if project is None:  # vừa bị xóa bởi request khác
+        raise NotFoundException(messages.PROJECT_NOT_FOUND)
+    return project
+
+
 def project_access(
-    minimum: WorkspaceRole, *, writable: bool = False, exclusive: bool = False
+    minimum: WorkspaceRole, *, writable: bool = False, lock: bool = False
 ) -> Callable[..., Project]:
     """Project trên URL + user có ít nhất role `minimum` trong workspace chứa project.
 
-    writable: project phải ACTIVE. Status được đọc bằng SELECT ... FOR SHARE (exclusive ->
-    FOR UPDATE khi chính dòng project sắp bị sửa / xóa), xem crud.project.lock_status.
+    writable: project phải ACTIVE. Status đọc bằng SELECT ... FOR SHARE (crud.project.lock_status)
+        để archive không chen vào giữa lúc đang ghi task / comment.
+    lock: request sẽ sửa / xóa chính dòng project -> SELECT ... FOR UPDATE và đọc lại project.
+        Chỉ khóa SAU khi đã kiểm tra quyền: người không có quyền không giữ được khóa.
     """
 
     def dependency(project_id: int, user: CurrentUser, db: DbSession) -> Project:
@@ -150,9 +159,14 @@ def project_access(
         role = crud.workspace.get_role(db, project.workspace_id, user.id)
         _require_member(user, role, messages.PROJECT_NOT_FOUND)
         if writable:
-            status = crud.project.lock_status(db, project.id, exclusive=exclusive)
+            # lock=True: chưa khóa ở đây, chỉ kiểm tra sớm để 409 đứng trước 403
+            status = project.status if lock else crud.project.lock_status(db, project.id)
             _raise_if_not_writable(status, messages.PROJECT_NOT_FOUND)
         _require_role(user, role, minimum)
+        if lock:
+            project = _lock_project(db, project.id)
+            if writable:  # status có thể đã đổi trong lúc chờ khóa
+                _raise_if_not_writable(project.status, messages.PROJECT_NOT_FOUND)
         return project
 
     return dependency
@@ -164,26 +178,37 @@ EditableProject = Annotated[
     Project, Depends(project_access(WorkspaceRole.EDITOR, writable=True))
 ]
 # Archive / unarchive (OWNER, project ở trạng thái nào cũng được)
-ManagedProject = Annotated[Project, Depends(project_access(WorkspaceRole.OWNER))]
-# Sửa / xóa chính project (OWNER, project ACTIVE, khóa độc quyền dòng project)
+ManagedProject = Annotated[Project, Depends(project_access(WorkspaceRole.OWNER, lock=True))]
+# Sửa / xóa chính project (OWNER, project ACTIVE)
 ChangeableProject = Annotated[
-    Project, Depends(project_access(WorkspaceRole.OWNER, writable=True, exclusive=True))
+    Project, Depends(project_access(WorkspaceRole.OWNER, writable=True, lock=True))
 ]
 
 
-def task_access(minimum: WorkspaceRole, *, writable: bool = False) -> Callable[..., Task]:
-    """Task trên URL (load đủ creator / assignee / tags) + role tối thiểu trong workspace."""
+def task_access(
+    minimum: WorkspaceRole,
+    *,
+    writable: bool = False,
+    lock: bool = False,
+) -> Callable[..., Task]:
+    """Task trên URL + user có ít nhất role `minimum` trong workspace chứa task.
+
+    writable: project chứa task phải ACTIVE (FOR SHARE, giống project_access).
+    lock: khóa dòng task (FOR UPDATE) sau khi kiểm tra quyền, vd 2 người assign cùng 1 task
+        cùng lúc thì request sau chờ request trước commit xong.
+    """
 
     def dependency(task_id: int, user: CurrentUser, db: DbSession) -> Task:
-        task = crud.task.get(db, task_id)
-        if task is None:
-            raise NotFoundException(messages.TASK_NOT_FOUND)
-        role = crud.workspace.get_role_for_project(db, task.project_id, user.id)
+        # 1 query JOIN lấy role; None = task không tồn tại HOẶC không phải thành viên
+        role = crud.workspace.get_role_for_task(db, task_id, user.id)
         _require_member(user, role, messages.TASK_NOT_FOUND)
         if writable:
-            status = crud.project.lock_status(db, task.project_id)
+            status = crud.task.lock_project_status(db, task_id)
             _raise_if_not_writable(status, messages.TASK_NOT_FOUND)
         _require_role(user, role, minimum)
+        task = crud.task.get_for_update(db, task_id) if lock else crud.task.get(db, task_id)
+        if task is None:  # admin xem task không tồn tại, hoặc task vừa bị xóa
+            raise NotFoundException(messages.TASK_NOT_FOUND)
         return task
 
     return dependency
@@ -191,6 +216,9 @@ def task_access(minimum: WorkspaceRole, *, writable: bool = False) -> Callable[.
 
 ReadableTask = Annotated[Task, Depends(task_access(WorkspaceRole.VIEWER))]
 EditableTask = Annotated[Task, Depends(task_access(WorkspaceRole.EDITOR, writable=True))]
+AssignableTask = Annotated[
+    Task, Depends(task_access(WorkspaceRole.EDITOR, writable=True, lock=True))
+]
 
 
 def get_readable_task_id(task_id: int, user: CurrentUser, db: DbSession) -> int:
@@ -217,18 +245,6 @@ def verify_task_deleter(user: CurrentUser, task: EditableTask, db: DbSession) ->
 DeletableTask = Annotated[Task, Depends(verify_task_deleter)]
 
 
-def get_task_for_assign(task: EditableTask, db: DbSession) -> Task:
-    """Khóa thêm dòng task (SELECT ... FOR UPDATE) tới hết transaction: 2 người assign cùng 1
-    task cùng lúc thì request sau phải chờ request trước commit xong."""
-    locked = crud.task.get_for_update(db, task.id)
-    if locked is None:  # task vừa bị xóa bởi request khác
-        raise NotFoundException(messages.TASK_NOT_FOUND)
-    return locked
-
-
-AssignableTask = Annotated[Task, Depends(get_task_for_assign)]
-
-
 def verify_comment_modifier(
     task_id: int, comment_id: int, user: CurrentUser, db: DbSession
 ) -> Comment:
@@ -236,11 +252,11 @@ def verify_comment_modifier(
     Lọc theo cả task_id để chặn truy cập chéo: /tasks/1/comments/<id comment của task 2>."""
     role = crud.workspace.get_role_for_task(db, task_id, user.id)
     _require_member(user, role, messages.TASK_NOT_FOUND)
+    comment = crud.comment.get(db, task_id=task_id, comment_id=comment_id)
+    if comment is None:  # 404 đứng trước 409 / 403
+        raise NotFoundException(messages.COMMENT_NOT_FOUND)
     _raise_if_not_writable(crud.task.lock_project_status(db, task_id), messages.TASK_NOT_FOUND)
     _require_role(user, role, WorkspaceRole.EDITOR)
-    comment = crud.comment.get(db, task_id=task_id, comment_id=comment_id)
-    if comment is None:
-        raise NotFoundException(messages.COMMENT_NOT_FOUND)
     if not permissions.can_modify_comment(user, role, comment):
         raise ForbiddenException(messages.COMMENT_MODIFY_FORBIDDEN)
     return comment

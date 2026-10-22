@@ -74,7 +74,7 @@ def remove_member(db: Session, *, workspace: Workspace, user_id: int, actor: Use
             task=task,
             actor=actor,
             action=ActivityAction.ASSIGNED,
-            detail=f"unassigned ({member.user.username} left the workspace)",
+            detail=f"unassigned ({member.user.full_name} left the workspace)",
         )
     crud.workspace.delete_member(db, member)
     db.commit()
