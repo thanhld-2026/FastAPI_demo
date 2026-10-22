@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.exc import IntegrityError
 
 from app import crud
@@ -7,6 +7,7 @@ from app.core.exceptions import BadRequestException, ConflictException, NotFound
 from app.core.responses import error_responses
 from app.dependencies import AdminUser, CurrentUser, DbSession, Pagination, verify_admin_role
 from app.models import UserRole
+from app.schemas.auth import TokenPair
 from app.schemas.common import Page
 from app.schemas.profile import UserProfile
 from app.schemas.task import TaskOut
@@ -50,12 +51,12 @@ def update_me(data: UserUpdate, current_user: CurrentUser, db: DbSession):
 
 @router.put(
     "/me/password",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Đổi mật khẩu (đăng xuất mọi thiết bị khác)",
+    response_model=TokenPair,
+    summary="Đổi mật khẩu: thiết bị khác bị đăng xuất, thiết bị hiện tại nhận cặp token mới",
     responses=error_responses(400, 401, 403),
 )
 def change_password(data: PasswordChange, current_user: CurrentUser, db: DbSession):
-    auth_service.change_password(db, current_user, data)
+    return auth_service.change_password(db, current_user, data)
 
 
 @router.get(
@@ -96,17 +97,21 @@ def admin_update_user(user_id: int, data: AdminUserUpdate, admin: AdminUser, db:
     demote_or_deactivate = data.role not in (None, UserRole.ADMIN) or data.is_active is False
     if user.id == admin.id and demote_or_deactivate:
         raise BadRequestException(messages.ADMIN_CANNOT_DEMOTE_SELF)
+    if data.is_active is False:
+        # Khóa tài khoản = kết thúc mọi phiên: nếu không, mở khóa lại thì refresh token cũ
+        # (có thể đang trong tay kẻ gian, lý do bị khóa) dùng được tiếp. Commit cùng admin_update.
+        auth_service.revoke_all_sessions(db, user.id)
     return crud.user.admin_update(db, user, data)
 
 
 @router.get(
-    "/{username}/profile",
+    "/{user_id}/profile",
     response_model=UserProfile,
     summary="Trang cá nhân công khai",
     responses=error_responses(404),
 )
-def get_profile(username: str, db: DbSession):
-    user = crud.user.get_profile(db, username)
+def get_profile(user_id: int, db: DbSession):
+    user = crud.user.get_profile(db, user_id)
     if user is None:
         raise NotFoundException(messages.USER_NOT_FOUND)
     return user

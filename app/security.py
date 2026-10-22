@@ -26,8 +26,8 @@ def verify_password(password: str, hashed_password: str) -> bool:
         return False
 
 
-# Hash giả dùng khi username không tồn tại: vẫn chạy bcrypt để thời gian phản hồi
-# tương đương trường hợp sai mật khẩu -> chống dò username bằng timing attack.
+# Hash giả dùng khi email không tồn tại: vẫn chạy bcrypt để thời gian phản hồi
+# tương đương trường hợp sai mật khẩu -> chống dò email bằng timing attack.
 DUMMY_HASH = hash_password("dummy-password-for-timing-attack")
 
 

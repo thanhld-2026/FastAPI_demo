@@ -43,7 +43,7 @@ def pg_session_factory() -> Iterator[sessionmaker[Session]]:
 @pytest.fixture
 def project_id(pg_session_factory: sessionmaker[Session]) -> int:
     with pg_session_factory() as db:
-        owner = User(username="pm", email="pm@example.com", hashed_password="x")
+        owner = User(full_name="pm", email="pm@example.com", hashed_password="x")
         project = Project(name="TaskHub", owner=owner)
         db.add(project)
         db.commit()

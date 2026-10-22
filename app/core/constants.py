@@ -9,8 +9,6 @@ thì input hợp lệ vẫn có thể bị DB từ chối.
 API_V1_PREFIX = "/api/v1"
 
 # --- User ---
-USERNAME_MIN_LENGTH = 3
-USERNAME_MAX_LENGTH = 50
 EMAIL_MAX_LENGTH = 255
 PASSWORD_HASH_MAX_LENGTH = 255  # chuỗi bcrypt dài 60, để dư cho thuật toán khác
 FULL_NAME_MAX_LENGTH = 100

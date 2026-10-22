@@ -165,7 +165,7 @@ def assign(db: Session, *, task: Task, assignee: User | None, actor: User) -> Ta
             task=task,
             actor=actor,
             action=ActivityAction.ASSIGNED,
-            detail=f"assigned to {assignee.username}" if assignee else "unassigned",
+            detail=f"assigned to {assignee.full_name}" if assignee else "unassigned",
         )
         db.commit()
     return _reload(db, task.id)
