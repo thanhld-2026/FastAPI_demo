@@ -50,6 +50,26 @@ def test_comment_notifies_task_creator_and_assignee(
     assert "Please review" in sent_emails[0]["body"]
 
 
+def test_comment_does_not_notify_users_who_left_the_workspace(
+    client, make_user, make_project, make_task, add_member, sent_emails
+):
+    pm = make_user("pmuser")
+    creator = make_user("creator")
+    project = make_project(pm)
+    add_member(project, pm, creator)
+    task = make_task(project["id"], creator)
+    client.delete(
+        f"/api/v1/workspaces/{project['workspace_id']}/members/{creator['id']}",
+        headers=creator["headers"],
+    )
+
+    client.post(
+        f"/api/v1/tasks/{task['id']}/comments", json={"content": "Note"}, headers=pm["headers"]
+    )
+
+    assert sent_emails == []  # đã rời workspace thì không nhận nội dung task nữa
+
+
 def test_commenter_does_not_notify_themselves(
     client, make_user, make_project, make_task, sent_emails
 ):
@@ -90,13 +110,14 @@ def fake_redis(monkeypatch) -> fakeredis.FakeRedis:
     return client
 
 
-def test_tags_are_cached_and_invalidated_on_change(client, make_tag, fake_redis):
+def test_tags_are_cached_and_invalidated_on_change(client, make_user, make_tag, fake_redis):
+    headers = make_user("alice")["headers"]
     make_tag("backend")
 
-    first = client.get("/api/v1/tags")
-    second = client.get("/api/v1/tags")
+    first = client.get("/api/v1/tags", headers=headers)
+    second = client.get("/api/v1/tags", headers=headers)
     make_tag("frontend")  # tạo tag mới -> xóa cache
-    third = client.get("/api/v1/tags")
+    third = client.get("/api/v1/tags", headers=headers)
 
     assert first.headers["X-Cache"] == "MISS"
     assert second.headers["X-Cache"] == "HIT"
@@ -106,21 +127,25 @@ def test_tags_are_cached_and_invalidated_on_change(client, make_tag, fake_redis)
     assert fake_redis.ttl("taskhub:tags:all") > 0  # cache có thời hạn
 
 
-def test_tags_work_without_redis(client, make_tag):
+def test_tags_work_without_redis(client, make_user, make_tag):
+    headers = make_user("alice")["headers"]
     make_tag("backend")
 
-    resp = client.get("/api/v1/tags")
+    resp = client.get("/api/v1/tags", headers=headers)
 
     assert resp.status_code == 200
     assert resp.headers["X-Cache"] == "MISS"
 
 
-def test_tags_fall_back_to_database_when_redis_is_down(client, make_tag, monkeypatch):
+def test_tags_fall_back_to_database_when_redis_is_down(
+    client, make_user, make_tag, monkeypatch
+):
+    headers = make_user("alice")["headers"]
     unreachable = redis.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.2)
     monkeypatch.setattr(cache, "get_redis", lambda: unreachable)
     make_tag("backend")
 
-    resp = client.get("/api/v1/tags")
+    resp = client.get("/api/v1/tags", headers=headers)
 
     assert resp.status_code == 200
     assert [t["name"] for t in resp.json()] == ["backend"]

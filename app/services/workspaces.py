@@ -4,12 +4,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import crud
+from app import crud, permissions
 from app.core import messages
 from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
 from app.models import (
     ActivityAction,
     Project,
+    ProjectStatus,
     Task,
     User,
     Workspace,
@@ -39,43 +40,63 @@ def invite_member(
     return member
 
 
-def _get_non_owner_member(db: Session, workspace: Workspace, user_id: int) -> WorkspaceMember:
-    member = crud.workspace.get_member(db, workspace.id, user_id)
+def _get_member_for_change(db: Session, workspace: Workspace, user_id: int) -> WorkspaceMember:
+    """Thành viên (khác OWNER) sắp bị đổi role / xóa, khóa dòng membership tới khi commit."""
+    member = crud.workspace.get_member(db, workspace.id, user_id, lock=True)
     if member is None:
         raise NotFoundException(messages.MEMBER_NOT_FOUND)
-    if user_id == workspace.owner_id:
+    if member.role == WorkspaceRole.OWNER:
         raise BadRequestException(messages.OWNER_MEMBERSHIP_LOCKED)
     return member
 
 
-def change_member_role(
-    db: Session, *, workspace: Workspace, user_id: int, role: WorkspaceRole
-) -> WorkspaceMember:
-    member = _get_non_owner_member(db, workspace, user_id)
-    crud.workspace.set_member_role(db, member, role)
-    return member
+def _unassign_tasks(db: Session, *, member: WorkspaceMember, actor: User, reason: str) -> None:
+    """Bỏ assign task của `member` trong các project ACTIVE của workspace (có ghi activity).
 
-
-def remove_member(db: Session, *, workspace: Workspace, user_id: int, actor: User) -> None:
-    """Xóa thành viên + bỏ assign các task của họ trong workspace (có ghi activity), 1 commit.
-
-    Người ngoài workspace không đọc được task nữa, để họ đứng tên assignee là sai dữ liệu.
+    Chỉ EDITOR trở lên mới được giao task, mất quyền đó thì task phải trả lại để giao người khác.
+    Project đã archive là chỉ đọc nên giữ nguyên (lịch sử ai từng làm task). FOR SHARE các dòng
+    project để archive không chen vào giữa chừng.
     """
-    member = _get_non_owner_member(db, workspace, user_id)
-    assigned = db.scalars(
+    tasks = db.scalars(
         select(Task)
         .join(Project, Project.id == Task.project_id)
-        .where(Project.workspace_id == workspace.id, Task.assignee_id == user_id)
+        .where(
+            Project.workspace_id == member.workspace_id,
+            Project.status == ProjectStatus.ACTIVE,
+            Task.assignee_id == member.user_id,
+        )
+        .with_for_update(read=True, of=Project)
     ).all()
-    for task in assigned:
+    for task in tasks:
         task.assignee = None
         crud.activity.add(
             db,
             task=task,
             actor=actor,
             action=ActivityAction.ASSIGNED,
-            detail=f"unassigned ({member.user.full_name} left the workspace)",
+            detail=f"unassigned ({member.user.full_name} {reason})",
         )
+
+
+def change_member_role(
+    db: Session, *, workspace: Workspace, user_id: int, role: WorkspaceRole, actor: User
+) -> WorkspaceMember:
+    member = _get_member_for_change(db, workspace, user_id)
+    if member.role != role and not permissions.can_be_assigned(role):
+        _unassign_tasks(db, member=member, actor=actor, reason=f"is now {role.value}")
+    member.role = role
+    db.commit()
+    return member
+
+
+def remove_member(db: Session, *, workspace: Workspace, user_id: int, actor: User) -> None:
+    """Xóa thành viên (hoặc tự rời) + bỏ assign task của họ, trong cùng 1 commit.
+
+    Người ngoài workspace không đọc được task nữa, để họ đứng tên assignee là sai dữ liệu.
+    """
+    member = _get_member_for_change(db, workspace, user_id)
+    reason = "left the workspace" if actor.id == user_id else "was removed from the workspace"
+    _unassign_tasks(db, member=member, actor=actor, reason=reason)
     crud.workspace.delete_member(db, member)
     db.commit()
 
@@ -83,4 +104,9 @@ def remove_member(db: Session, *, workspace: Workspace, user_id: int, actor: Use
 def delete_workspace(db: Session, workspace: Workspace) -> None:
     if crud.workspace.has_projects(db, workspace.id):
         raise ConflictException(messages.WORKSPACE_HAS_PROJECTS)
-    crud.workspace.delete(db, workspace)
+    try:
+        crud.workspace.delete(db, workspace)
+    except IntegrityError:
+        # Project được tạo cùng lúc (sau bước kiểm tra trên): FK RESTRICT chặn việc xóa
+        db.rollback()
+        raise ConflictException(messages.WORKSPACE_HAS_PROJECTS) from None

@@ -149,8 +149,9 @@ Quy ước:
   - Admin hệ thống làm được mọi thứ ở mọi workspace.
 - Không phải thành viên → `404` (không lộ resource có tồn tại hay không); là thành viên nhưng role
   không đủ → `403`. Thứ tự lỗi: 401 → 404 → 409 (project đã archive) → 403.
-- Chỉ giao task cho thành viên từ `EDITOR` trở lên. Xóa thành viên thì các task của họ trong
-  workspace được bỏ assign (có ghi activity).
+- Chỉ giao task cho thành viên từ `EDITOR` trở lên. Thành viên rời / bị xóa khỏi workspace hoặc
+  bị hạ xuống `VIEWER` thì task của họ trong các project `ACTIVE` được bỏ assign (có ghi activity);
+  project đã archive giữ nguyên. Email báo comment chỉ gửi cho người còn trong workspace.
 - Mọi API nằm dưới prefix `/api/v1`.
 - Danh sách phân trang bằng `page` (1 tới 10 000) + `limit` (mặc định 20, tối đa 100),
   response có `total` và `pages` (tổng số trang, tối thiểu 1). `page` vượt quá `pages` trả
@@ -195,7 +196,7 @@ Quy ước:
 | GET | `/api/v1/tasks/{task_id}/activities` | VIEWER (phân trang) | 6 |
 | GET / POST | `/api/v1/tasks/{task_id}/comments` | GET: VIEWER (phân trang), POST: EDITOR (gửi email ngầm) | 6, 7 |
 | PUT / DELETE | `/api/v1/tasks/{task_id}/comments/{comment_id}` | Tác giả (EDITOR) / OWNER | 6 |
-| GET | `/api/v1/tags` | Công khai (cache Redis) | 2, 7 |
+| GET | `/api/v1/tags` | Đã đăng nhập (cache Redis) | 2, 7 |
 | POST / DELETE | `/api/v1/tags`, `/api/v1/tags/{tag_id}` | Admin | 7 |
 | GET | `/health` | Công khai | 8 |
 

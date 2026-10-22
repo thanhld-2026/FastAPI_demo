@@ -30,11 +30,13 @@ def is_admin(user: User) -> bool:
     return user.role == UserRole.ADMIN
 
 
+def _at_least(role: WorkspaceRole | None, minimum: WorkspaceRole) -> bool:
+    return role is not None and _ROLE_RANK[role] >= _ROLE_RANK[minimum]
+
+
 def has_role(user: User, role: WorkspaceRole | None, minimum: WorkspaceRole) -> bool:
     """`role`: role của user trong workspace đang xét (None = không phải thành viên)."""
-    if is_admin(user):
-        return True
-    return role is not None and _ROLE_RANK[role] >= _ROLE_RANK[minimum]
+    return is_admin(user) or _at_least(role, minimum)
 
 
 def can_delete_task(user: User, role: WorkspaceRole | None, task: Task) -> bool:
@@ -53,7 +55,7 @@ def can_modify_comment(user: User, role: WorkspaceRole | None, comment: Comment)
 def can_be_assigned(role: WorkspaceRole | None) -> bool:
     """Chỉ giao task cho người làm được task: thành viên từ EDITOR trở lên (admin cũng phải là
     thành viên, vì task giao cho người ngoài workspace thì người đó không đọc được)."""
-    return role is not None and _ROLE_RANK[role] >= _ROLE_RANK[WorkspaceRole.EDITOR]
+    return _at_least(role, WorkspaceRole.EDITOR)
 
 
 def can_remove_member(user: User, role: WorkspaceRole | None, target_user_id: int) -> bool:

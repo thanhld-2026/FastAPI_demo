@@ -1,4 +1,4 @@
-"""Khóa dòng khi archive / sửa project, chạy trên PostgreSQL thật.
+"""Khóa dòng (archive / sửa project, giao task / đổi role thành viên), chạy trên PostgreSQL thật.
 
 SQLite (dùng cho các test khác) bỏ qua FOR SHARE / FOR UPDATE nên không kiểm tra được.
 Chạy riêng (DB rỗng, test sẽ tạo / xóa bảng):
@@ -10,6 +10,7 @@ import os
 import threading
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 import pytest
 from sqlalchemy import create_engine, text, update
@@ -40,16 +41,31 @@ def pg_session_factory() -> Iterator[sessionmaker[Session]]:
     engine.dispose()
 
 
+@dataclass
+class Ids:
+    project: int
+    workspace: int
+    editor: int
+
+
 @pytest.fixture
-def project_id(pg_session_factory: sessionmaker[Session]) -> int:
+def ids(pg_session_factory: sessionmaker[Session]) -> Ids:
+    """Workspace (owner + 1 EDITOR) chứa 1 project."""
     with pg_session_factory() as db:
         owner = User(full_name="owner", email="owner@example.com", hashed_password="x")
+        editor = User(full_name="carol", email="carol@example.com", hashed_password="x")
         workspace = Workspace(name="Team", owner=owner)
         workspace.members.append(WorkspaceMember(user=owner, role=WorkspaceRole.OWNER))
+        workspace.members.append(WorkspaceMember(user=editor, role=WorkspaceRole.EDITOR))
         project = Project(name="TaskHub", workspace=workspace, creator=owner)
         db.add(project)
         db.commit()
-        return project.id
+        return Ids(project=project.id, workspace=workspace.id, editor=editor.id)
+
+
+@pytest.fixture
+def project_id(ids: Ids) -> int:
+    return ids.project
 
 
 def _archive(db: Session, project_id: int) -> None:
@@ -115,3 +131,21 @@ def test_get_for_update_reloads_the_locked_row(pg_session_factory, project_id):
         late.rollback()  # luôn nhả khóa, kể cả khi assert fail (nếu không, teardown bị treo)
         late.close()
 
+
+def test_member_cannot_be_demoted_while_a_task_is_being_assigned_to_them(pg_session_factory, ids):
+    """Giao task đọc role người nhận bằng FOR SHARE -> đổi role / xóa thành viên (FOR UPDATE
+    dòng membership) phải chờ, không thể giao task cho người vừa bị hạ xuống VIEWER."""
+    assigner = pg_session_factory()
+    owner = pg_session_factory()
+    try:
+        role = crud.workspace.get_role_for_project(assigner, ids.project, ids.editor, lock=True)
+        assert role == WorkspaceRole.EDITOR
+        owner.execute(text("SET lock_timeout = '300ms'"))
+
+        with pytest.raises(OperationalError):
+            crud.workspace.get_member(owner, ids.workspace, ids.editor, lock=True)
+    finally:
+        owner.rollback()
+        assigner.rollback()
+        assigner.close()
+        owner.close()

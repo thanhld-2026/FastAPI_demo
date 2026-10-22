@@ -190,12 +190,14 @@ def task_access(
     *,
     writable: bool = False,
     lock: bool = False,
+    for_delete: bool = False,
 ) -> Callable[..., Task]:
     """Task trên URL + user có ít nhất role `minimum` trong workspace chứa task.
 
     writable: project chứa task phải ACTIVE (FOR SHARE, giống project_access).
     lock: khóa dòng task (FOR UPDATE) sau khi kiểm tra quyền, vd 2 người assign cùng 1 task
         cùng lúc thì request sau chờ request trước commit xong.
+    for_delete: thêm quy tắc xóa task (EDITOR chỉ xóa task mình tạo), dùng luôn role đã đọc.
     """
 
     def dependency(task_id: int, user: CurrentUser, db: DbSession) -> Task:
@@ -209,6 +211,8 @@ def task_access(
         task = crud.task.get_for_update(db, task_id) if lock else crud.task.get(db, task_id)
         if task is None:  # admin xem task không tồn tại, hoặc task vừa bị xóa
             raise NotFoundException(messages.TASK_NOT_FOUND)
+        if for_delete and not permissions.can_delete_task(user, role, task):
+            raise ForbiddenException(messages.TASK_DELETE_FORBIDDEN)
         return task
 
     return dependency
@@ -218,6 +222,10 @@ ReadableTask = Annotated[Task, Depends(task_access(WorkspaceRole.VIEWER))]
 EditableTask = Annotated[Task, Depends(task_access(WorkspaceRole.EDITOR, writable=True))]
 AssignableTask = Annotated[
     Task, Depends(task_access(WorkspaceRole.EDITOR, writable=True, lock=True))
+]
+# EDITOR chỉ xóa task mình tạo; OWNER / admin xóa được mọi task
+DeletableTask = Annotated[
+    Task, Depends(task_access(WorkspaceRole.EDITOR, writable=True, for_delete=True))
 ]
 
 
@@ -232,17 +240,6 @@ def get_readable_task_id(task_id: int, user: CurrentUser, db: DbSession) -> int:
 
 
 ReadableTaskId = Annotated[int, Depends(get_readable_task_id)]
-
-
-def verify_task_deleter(user: CurrentUser, task: EditableTask, db: DbSession) -> Task:
-    """EDITOR mới xóa được, và chỉ xóa task mình tạo; OWNER / admin xóa được mọi task."""
-    role = crud.workspace.get_role_for_project(db, task.project_id, user.id)
-    if not permissions.can_delete_task(user, role, task):
-        raise ForbiddenException(messages.TASK_DELETE_FORBIDDEN)
-    return task
-
-
-DeletableTask = Annotated[Task, Depends(verify_task_deleter)]
 
 
 def verify_comment_modifier(

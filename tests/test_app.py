@@ -46,14 +46,16 @@ def test_cors_rejects_unknown_origin(client):
     assert "access-control-allow-origin" not in resp.headers
 
 
-def test_unhandled_error_returns_generic_500(client, monkeypatch):
+def test_unhandled_error_returns_generic_500(client, make_user, monkeypatch):
     def broken_list_tags(db):
         raise RuntimeError("database exploded: SELECT * FROM secret_table")
 
+    user = make_user("alice")
     monkeypatch.setattr(crud.tag, "list_tags", broken_list_tags)
 
     resp = client.get(
-        "/api/v1/tags", headers={"X-Request-ID": "req-500", "Origin": "http://localhost:3000"}
+        "/api/v1/tags",
+        headers={**user["headers"], "X-Request-ID": "req-500", "Origin": "http://localhost:3000"},
     )
 
     assert resp.status_code == 500

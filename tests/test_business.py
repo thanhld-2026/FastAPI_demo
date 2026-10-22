@@ -67,16 +67,20 @@ def test_viewer_cannot_assign_task(client, setup):
     assert resp.status_code == 403
 
 
-def test_assignee_must_be_an_editor_of_the_workspace(client, make_user, setup):
+def test_assignee_must_be_an_active_editor_of_the_workspace(
+    client, make_user, add_member, setup
+):
     outsider = make_user("outsider")
     admin = make_user("boss", admin=True)
     sleeper = make_user("sleeper")
+    add_member(setup.project, setup.owner, sleeper, role="EDITOR")
     url = f"/api/v1/tasks/{setup.task['id']}/assign"
     headers = setup.owner["headers"]
 
     to_viewer = client.post(url, json={"assignee_id": setup.viewer["id"]}, headers=headers)
     to_outsider = client.post(url, json={"assignee_id": outsider["id"]}, headers=headers)
     to_missing = client.post(url, json={"assignee_id": 999}, headers=headers)
+    to_sleeper = client.post(url, json={"assignee_id": sleeper["id"]}, headers=headers)
     client.patch(
         f"/api/v1/users/{sleeper['id']}", json={"is_active": False}, headers=admin["headers"]
     )
@@ -85,6 +89,7 @@ def test_assignee_must_be_an_editor_of_the_workspace(client, make_user, setup):
         "/api/v1/tasks/999/assign", json={"assignee_id": None}, headers=headers
     )
 
+    assert to_sleeper.status_code == 200  # EDITOR còn hoạt động thì giao được
     assert [r.status_code for r in (to_viewer, to_outsider, to_missing, to_inactive)] == [400] * 4
     assert unknown_task.status_code == 404
 

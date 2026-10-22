@@ -30,7 +30,11 @@ class Workspace(TimestampMixin, Base):
     members: Mapped[list[WorkspaceMember]] = relationship(
         back_populates="workspace", cascade="all, delete-orphan", order_by="WorkspaceMember.user_id"
     )
-    projects: Mapped[list[Project]] = relationship(back_populates="workspace")
+    # passive_deletes="all": ORM không tự load / sửa project khi xóa workspace, để FK RESTRICT
+    # trong DB quyết định (không thì ORM thử set workspace_id = NULL cho project còn sót)
+    projects: Mapped[list[Project]] = relationship(
+        back_populates="workspace", passive_deletes="all"
+    )
 
 
 class WorkspaceMember(Base):

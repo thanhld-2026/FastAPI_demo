@@ -34,13 +34,21 @@ def get_role(db: Session, workspace_id: int, user_id: int) -> WorkspaceRole | No
     return db.scalar(stmt)
 
 
-def get_role_for_project(db: Session, project_id: int, user_id: int) -> WorkspaceRole | None:
-    """Role của user trong workspace chứa project, 1 query JOIN (không cần load project)."""
+def get_role_for_project(
+    db: Session, project_id: int, user_id: int, *, lock: bool = False
+) -> WorkspaceRole | None:
+    """Role của user trong workspace chứa project, 1 query JOIN (không cần load project).
+
+    lock: khóa chia sẻ dòng membership (FOR SHARE) tới hết transaction: đổi role / xóa thành
+    viên (FOR UPDATE dòng đó) phải chờ. Dùng khi giao task cho user này.
+    """
     stmt = (
         select(WorkspaceMember.role)
         .join(Project, Project.workspace_id == WorkspaceMember.workspace_id)
         .where(Project.id == project_id, WorkspaceMember.user_id == user_id)
     )
+    if lock:
+        stmt = stmt.with_for_update(read=True, of=WorkspaceMember)
     return db.scalar(stmt)
 
 
@@ -115,28 +123,40 @@ def has_projects(db: Session, workspace_id: int) -> bool:
 
 
 def delete(db: Session, workspace: Workspace) -> None:
-    db.delete(workspace)  # cascade xóa luôn workspace_members
+    """Cascade xóa luôn workspace_members. Còn project thì FK RESTRICT chặn (IntegrityError)."""
+    db.delete(workspace)
     db.commit()
 
 
 # ---------- Member ----------
-def get_member(db: Session, workspace_id: int, user_id: int) -> WorkspaceMember | None:
+def get_member(
+    db: Session, workspace_id: int, user_id: int, *, lock: bool = False
+) -> WorkspaceMember | None:
+    """lock: SELECT ... FOR UPDATE dòng membership + đọc lại, dùng khi đổi role / xóa thành viên
+    (giao task cho người này cùng lúc phải chờ, xem get_role_for_project)."""
     stmt = (
         select(WorkspaceMember)
         .where(WorkspaceMember.workspace_id == workspace_id, WorkspaceMember.user_id == user_id)
         .options(joinedload(WorkspaceMember.user))
     )
+    if lock:
+        stmt = stmt.with_for_update(of=WorkspaceMember).execution_options(
+            populate_existing=True
+        )
     return db.scalar(stmt)
+
+
+def member_user_ids(db: Session, workspace_id: int, user_ids: set[int]) -> set[int]:
+    """Những user trong `user_ids` hiện còn là thành viên workspace."""
+    stmt = select(WorkspaceMember.user_id).where(
+        WorkspaceMember.workspace_id == workspace_id, WorkspaceMember.user_id.in_(user_ids)
+    )
+    return set(db.scalars(stmt).all())
 
 
 def add_member(db: Session, *, workspace_id: int, user: User, role: WorkspaceRole) -> None:
     """Thêm vào session, KHÔNG commit (service commit, bắt IntegrityError khi trùng)."""
     db.add(WorkspaceMember(workspace_id=workspace_id, user=user, role=role))
-
-
-def set_member_role(db: Session, member: WorkspaceMember, role: WorkspaceRole) -> None:
-    member.role = role
-    db.commit()
 
 
 def delete_member(db: Session, member: WorkspaceMember) -> None:

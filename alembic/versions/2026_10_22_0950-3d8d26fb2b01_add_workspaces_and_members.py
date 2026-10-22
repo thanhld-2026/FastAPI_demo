@@ -6,8 +6,8 @@ và thêm cột NOT NULL vào bảng đã có dữ liệu -> lỗi). Các bướ
 2. Đổi tên projects.owner_id -> creator_id (giữ dữ liệu, đổi luôn tên index / FK cho khớp
    naming convention).
 3. Chuyển dữ liệu cũ: mỗi người đã tạo project có 1 workspace (là OWNER), project của họ
-   vào workspace đó; ai đã tham gia project (tạo task, được assign, comment) thành EDITOR
-   để không mất quyền truy cập.
+   vào workspace đó; ai đã tham gia project (tạo task, được assign, comment) thành EDITOR,
+   ai chỉ bookmark task thành VIEWER -> không ai mất quyền truy cập dữ liệu cũ.
 4. projects.workspace_id thành NOT NULL + FK.
 
 Revision ID: 3d8d26fb2b01
@@ -90,6 +90,18 @@ def upgrade() -> None:
         WHERE NOT EXISTS (
             SELECT 1 FROM workspace_members m
             WHERE m.workspace_id = p.workspace_id AND m.user_id = x.user_id
+        )
+    """)
+
+    op.execute("""
+        INSERT INTO workspace_members (workspace_id, user_id, role)
+        SELECT DISTINCT p.workspace_id, b.user_id, 'VIEWER'
+        FROM task_bookmarks b
+        JOIN tasks t ON t.id = b.task_id
+        JOIN projects p ON p.id = t.project_id
+        WHERE NOT EXISTS (
+            SELECT 1 FROM workspace_members m
+            WHERE m.workspace_id = p.workspace_id AND m.user_id = b.user_id
         )
     """)
 
