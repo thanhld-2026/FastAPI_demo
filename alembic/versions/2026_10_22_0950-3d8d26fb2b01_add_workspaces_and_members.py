@@ -50,6 +50,8 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('workspace_id', 'user_id', name=op.f('pk_workspace_members'))
     )
     op.create_index(op.f('ix_workspace_members_user_id'), 'workspace_members', ['user_id'], unique=False)
+    # Mỗi workspace tối đa 1 dòng OWNER (partial unique index, chỉ áp cho dòng role = 'OWNER')
+    op.create_index('uq_workspace_members_one_owner', 'workspace_members', ['workspace_id'], unique=True, postgresql_where=sa.text("role = 'OWNER'"))
 
     # 2. owner_id -> creator_id: đổi tên, không drop / add (giữ dữ liệu)
     op.alter_column('projects', 'owner_id', new_column_name='creator_id')
@@ -122,6 +124,7 @@ def downgrade() -> None:
     )
     op.execute('ALTER INDEX ix_projects_creator_id RENAME TO ix_projects_owner_id')
     op.alter_column('projects', 'creator_id', new_column_name='owner_id')
+    op.drop_index('uq_workspace_members_one_owner', table_name='workspace_members')
     op.drop_index(op.f('ix_workspace_members_user_id'), table_name='workspace_members')
     op.drop_table('workspace_members')
     op.drop_index(op.f('ix_workspaces_owner_id'), table_name='workspaces')

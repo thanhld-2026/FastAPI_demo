@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import Field, model_validator
 
-from app.core.constants import PROJECT_NAME_MAX_LENGTH
+from app.core.constants import PROJECT_NAME_MAX_LENGTH, REQUIRED_TEXT_MIN_LENGTH
 from app.models.enums import ProjectStatus
 from app.schemas.common import InputSchema, ORMSchema, reject_null_fields
 from app.schemas.task import TaskBrief
@@ -12,13 +12,17 @@ from app.schemas.user import UserPublic
 # ---------- Input ----------
 class ProjectCreate(InputSchema):
     name: str = Field(
-        min_length=1, max_length=PROJECT_NAME_MAX_LENGTH, examples=["TaskHub Backend"]
+        min_length=REQUIRED_TEXT_MIN_LENGTH,
+        max_length=PROJECT_NAME_MAX_LENGTH,
+        examples=["TaskHub Backend"],
     )
     description: str | None = Field(default=None, examples=["Xây dựng RESTful API cho TaskHub"])
 
 
 class ProjectUpdate(InputSchema):
-    name: str | None = Field(default=None, min_length=1, max_length=PROJECT_NAME_MAX_LENGTH)
+    name: str | None = Field(
+        default=None, min_length=REQUIRED_TEXT_MIN_LENGTH, max_length=PROJECT_NAME_MAX_LENGTH
+    )
     description: str | None = None
 
     @model_validator(mode="after")

@@ -69,6 +69,17 @@ def get(db: Session, workspace_id: int) -> Workspace | None:
     return db.get(Workspace, workspace_id)
 
 
+def get_for_update(db: Session, workspace_id: int) -> Workspace | None:
+    """SELECT ... FOR UPDATE + đọc lại: 2 request chuyển quyền owner cùng lúc chạy lần lượt."""
+    stmt = (
+        select(Workspace)
+        .where(Workspace.id == workspace_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return db.scalar(stmt)
+
+
 def get_detail(db: Session, workspace_id: int) -> Workspace | None:
     """Workspace + owner + danh sách member (kèm user), số query cố định."""
     stmt = (

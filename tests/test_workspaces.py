@@ -1,5 +1,10 @@
 """Phụ lục feature 3 + 11: workspace, thành viên, phân quyền OWNER / EDITOR / VIEWER."""
 
+import pytest
+from sqlalchemy.exc import IntegrityError
+
+from app.models import WorkspaceMember, WorkspaceRole
+
 WS_URL = "/api/v1/workspaces"
 
 
@@ -130,6 +135,73 @@ def test_remove_member_and_leave(client, make_user, make_workspace, add_member):
     members = client.get(f"{WS_URL}/{workspace['id']}", headers=owner["headers"]).json()["members"]
     assert [m["user"]["full_name"] for m in members] == ["owner"]
     assert client.get(f"{WS_URL}/{workspace['id']}", headers=carol["headers"]).status_code == 404
+
+
+# ---------- Chuyển quyền owner ----------
+def test_owner_transfers_ownership_to_a_member(client, make_user, make_workspace, add_member):
+    alice = make_user("alice")
+    bob = make_user("bob")
+    workspace = make_workspace(alice)
+    add_member(workspace, alice, bob, role="VIEWER")
+    url = f"{WS_URL}/{workspace['id']}"
+
+    to_bob = {"user_id": bob["id"]}
+    resp = client.post(f"{url}/transfer-ownership", json=to_bob, headers=alice["headers"])
+    # bob đã là owner: gọi lại không đổi gì
+    again = client.post(f"{url}/transfer-ownership", json=to_bob, headers=bob["headers"])
+
+    body = resp.json()
+    roles = {m["user"]["full_name"]: m["role"] for m in body["members"]}
+    assert resp.status_code == 200
+    assert body["owner"]["full_name"] == "bob"
+    assert roles == {"alice": "EDITOR", "bob": "OWNER"}  # owner cũ thành EDITOR, vẫn làm việc được
+    assert again.status_code == 200
+    # Quyền đi theo role mới
+    assert client.delete(url, headers=alice["headers"]).status_code == 403
+    assert client.patch(url, json={"name": "Bob team"}, headers=bob["headers"]).status_code == 200
+
+
+def test_transfer_ownership_rules(client, db, make_user, make_workspace, add_member):
+    alice = make_user("alice")
+    carol = make_user("carol")
+    sleeper = make_user("sleeper")
+    outsider = make_user("outsider")
+    admin = make_user("boss", admin=True)
+    workspace = make_workspace(alice)
+    add_member(workspace, alice, carol)
+    add_member(workspace, alice, sleeper)
+    client.patch(
+        f"/api/v1/users/{sleeper['id']}", json={"is_active": False}, headers=admin["headers"]
+    )
+    url = f"{WS_URL}/{workspace['id']}/transfer-ownership"
+
+    def transfer(user_id: int, by: dict) -> int:
+        return client.post(url, json={"user_id": user_id}, headers=by["headers"]).status_code
+
+    assert transfer(carol["id"], carol) == 403  # EDITOR không chuyển được
+    assert transfer(outsider["id"], alice) == 400  # không phải thành viên
+    assert transfer(sleeper["id"], alice) == 400  # tài khoản bị khóa
+    assert transfer(999, alice) == 400
+    # Owner bị khóa thì admin hệ thống chuyển quyền được, workspace không bị "mồ côi"
+    deactivate = {"is_active": False}
+    client.patch(f"/api/v1/users/{alice['id']}", json=deactivate, headers=admin["headers"])
+    assert transfer(carol["id"], admin) == 200
+    detail = client.get(f"{WS_URL}/{workspace['id']}", headers=carol["headers"]).json()
+    assert detail["owner"]["full_name"] == "carol"
+
+
+def test_database_allows_only_one_owner_per_workspace(db, make_user, make_workspace):
+    """Partial unique index: DB tự chặn dòng OWNER thứ 2, kể cả khi code có bug."""
+    alice = make_user("alice")
+    bob = make_user("bob")
+    workspace = make_workspace(alice)
+    second_owner = WorkspaceMember(
+        workspace_id=workspace["id"], user_id=bob["id"], role=WorkspaceRole.OWNER
+    )
+    db.add(second_owner)
+
+    with pytest.raises(IntegrityError):
+        db.commit()
 
 
 def test_removing_member_unassigns_their_tasks(

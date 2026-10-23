@@ -1,4 +1,4 @@
-"""Nghiệp vụ workspace: mời / đổi role / xóa thành viên, xóa workspace."""
+"""Nghiệp vụ workspace: mời / đổi role / xóa thành viên, chuyển quyền owner, xóa workspace."""
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session
 
 from app import crud, permissions
 from app.core import messages
-from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
+from app.core.exceptions import (
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+)
 from app.models import (
     ActivityAction,
     Project,
@@ -22,6 +27,12 @@ from app.models import (
 def invite_member(
     db: Session, *, workspace: Workspace, email: str, role: WorkspaceRole
 ) -> WorkspaceMember:
+    """Thêm thẳng người dùng đã đăng ký vào workspace (không cần họ đồng ý).
+
+    Cố ý giữ đơn giản cho bài thực hành, chấp nhận 2 hệ quả (ghi ở README): người được mời không
+    từ chối được (chỉ tự rời sau đó), và ai tạo workspace cũng dò được email nào đã đăng ký
+    (400 khác 201). Bản đầy đủ: lời mời chờ chấp nhận + trả cùng 1 response cho mọi email.
+    """
     invitee = crud.user.get_by_email(db, email)
     if invitee is None or not invitee.is_active:
         # Body tham chiếu dữ liệu không tồn tại -> 400 (404 dành cho resource trên URL)
@@ -98,6 +109,39 @@ def remove_member(db: Session, *, workspace: Workspace, user_id: int, actor: Use
     reason = "left the workspace" if actor.id == user_id else "was removed from the workspace"
     _unassign_tasks(db, member=member, actor=actor, reason=reason)
     crud.workspace.delete_member(db, member)
+    db.commit()
+
+
+def transfer_ownership(
+    db: Session, *, workspace: Workspace, new_owner_id: int, actor: User
+) -> None:
+    """Chuyển quyền OWNER cho 1 thành viên đang hoạt động; owner cũ thành EDITOR. 1 commit.
+
+    `workspaces.owner_id` và role OWNER trong workspace_members luôn đổi cùng nhau. Khóa dòng
+    workspace (FOR UPDATE) rồi kiểm tra lại quyền: 2 request chuyển quyền cùng lúc chạy lần lượt,
+    request sau thấy owner đã đổi thì bị chặn. Admin hệ thống cũng chuyển được (vd owner nghỉ việc,
+    tài khoản bị khóa).
+    """
+    locked = crud.workspace.get_for_update(db, workspace.id)
+    if locked is None:
+        raise NotFoundException(messages.WORKSPACE_NOT_FOUND)
+    if locked.owner_id != actor.id and not permissions.is_admin(actor):
+        raise ForbiddenException(
+            messages.WORKSPACE_ROLE_REQUIRED.format(role=WorkspaceRole.OWNER.value)
+        )
+    if new_owner_id == locked.owner_id:
+        return  # đã là owner: idempotent
+    new_owner = crud.workspace.get_member(db, locked.id, new_owner_id, lock=True)
+    if new_owner is None or not new_owner.user.is_active:
+        raise BadRequestException(messages.NEW_OWNER_NOT_MEMBER)
+    old_owner = crud.workspace.get_member(db, locked.id, locked.owner_id, lock=True)
+    assert old_owner is not None  # owner luôn có dòng membership OWNER
+    old_owner.role = WorkspaceRole.EDITOR
+    # Hạ owner cũ và ghi xuống DB TRƯỚC: unique index "1 OWNER / workspace" kiểm tra ngay từng câu
+    # UPDATE, nâng người mới trước thì có lúc 2 dòng OWNER -> IntegrityError
+    db.flush()
+    new_owner.role = WorkspaceRole.OWNER
+    locked.owner_id = new_owner_id
     db.commit()
 
 

@@ -82,7 +82,7 @@ Phiên đăng nhập gồm 2 token:
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 121 test (+6 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 124 test (+7 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 # Test khóa dòng (FOR SHARE / FOR UPDATE) cần PostgreSQL thật, DB rỗng dành riêng cho test:
 # (test xóa / tạo lại toàn bộ bảng nên tên DB bắt buộc kết thúc bằng _test, nếu không test dừng ngay)
@@ -148,8 +148,9 @@ Quy ước:
   **workspace**; quyền đi theo role trong workspace (RBAC, bảng quyền ở `app/permissions.py`):
   - `VIEWER`: đọc mọi thứ trong workspace, bookmark task.
   - `EDITOR`: + tạo / sửa / assign task, comment; xóa task / sửa, xóa comment **của mình**.
-  - `OWNER` (người tạo workspace, mỗi workspace 1 người): + quản lý project, thành viên, workspace,
-    xóa task / comment của người khác.
+  - `OWNER` (người tạo workspace, mỗi workspace đúng 1 người, DB chặn bằng partial unique index;
+    chuyển được cho thành viên khác): + quản lý project, thành viên, workspace, xóa task / comment
+    của người khác.
   - Admin hệ thống làm được mọi thứ ở mọi workspace.
 - Không phải thành viên → `404` (không lộ resource có tồn tại hay không); là thành viên nhưng role
   không đủ → `403`. Thứ tự lỗi: 401 → 404 → 409 (project đã archive) → 403.
@@ -186,6 +187,7 @@ Quy ước:
 | POST | `/api/v1/workspaces/{workspace_id}/members` | OWNER, mời theo email, role EDITOR / VIEWER | PL 3 |
 | PATCH | `/api/v1/workspaces/{workspace_id}/members/{user_id}` | OWNER, đổi role | PL 3 |
 | DELETE | `/api/v1/workspaces/{workspace_id}/members/{user_id}` | OWNER, hoặc tự rời workspace | PL 3 |
+| POST | `/api/v1/workspaces/{workspace_id}/transfer-ownership` | OWNER / Admin, chuyển cho 1 thành viên đang hoạt động (owner cũ thành EDITOR) | PL 3 |
 | POST | `/api/v1/workspaces/{workspace_id}/projects` | OWNER | 2, PL 4 |
 | GET | `/api/v1/projects?status=&workspace_id=` | Project trong workspace của tôi (lọc + phân trang) | 2, PL 4 |
 | GET | `/api/v1/projects/{project_id}` | VIEWER (kèm tasks lồng nhau) | 2, 3 |
@@ -214,3 +216,9 @@ Lỗi luôn trả về dạng `{"detail": "..."}`, mã lỗi của từng endpoi
 - `400`: body tham chiếu tới dữ liệu không tồn tại (tag_ids, assignee_id).
 - `409`: trùng dữ liệu (email, tag) hoặc project đã archive.
 - `422`: dữ liệu sai định dạng.
+
+Giới hạn / quyết định có chủ đích:
+
+- Mời thành viên theo email là thêm thẳng (không cần người được mời đồng ý, họ tự rời được), và
+  ai tạo workspace cũng biết được 1 email đã đăng ký hay chưa (400 khác 201). Chấp nhận trong phạm vi
+  bài thực hành; bản đầy đủ cần lời mời chờ chấp nhận + cùng 1 response cho mọi email.
