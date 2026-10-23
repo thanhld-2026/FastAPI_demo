@@ -245,19 +245,24 @@ def pg_client(pg_session_factory: sessionmaker[Session]) -> Iterator[TestClient]
     app.dependency_overrides.clear()
 
 
-def _owner_with_project(client: TestClient) -> tuple[dict[str, str], int]:
-    """Đăng ký + đăng nhập qua API, tạo workspace (là OWNER) + 1 project.
-    Trả về (headers, project_id)."""
+def _register(client: TestClient, name: str) -> tuple[dict[str, str], int]:
+    """Đăng ký + đăng nhập qua API. Trả về (headers, user_id)."""
+    email = f"{name}@example.com"
     register = client.post(
         "/api/v1/auth/register",
-        json={"full_name": "pm", "email": "pm@example.com", "password": DEFAULT_PASSWORD},
+        json={"full_name": name, "email": email, "password": DEFAULT_PASSWORD},
     )
     # Form OAuth2: field tên `username`, giá trị là email
     login = client.post(
-        "/api/v1/auth/login", data={"username": "pm@example.com", "password": DEFAULT_PASSWORD}
+        "/api/v1/auth/login", data={"username": email, "password": DEFAULT_PASSWORD}
     )
     assert (register.status_code, login.status_code) == (201, 200), login.text
-    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}, register.json()["id"]
+
+
+def _owner_with_project(client: TestClient) -> tuple[dict[str, str], int]:
+    """Tạo user làm OWNER của 1 workspace + 1 project. Trả về (headers, project_id)."""
+    headers, _ = _register(client, "pm")
     workspace = client.post("/api/v1/workspaces", json={"name": "Team"}, headers=headers).json()
     project = client.post(
         f"/api/v1/workspaces/{workspace['id']}/projects", json={"name": "TaskHub"}, headers=headers
@@ -321,3 +326,19 @@ def test_http_archive_waits_for_a_running_task_write(pg_client, pg_session_facto
     assert result["response"].status_code == 200
     assert result["response"].json()["status"] == "ARCHIVED"
     assert result["waited"] >= 0.2
+
+
+def test_http_transfer_ownership_respects_the_one_owner_index(pg_client):
+    """Unique index "1 OWNER / workspace" của PostgreSQL kiểm tra ngay từng câu UPDATE: chuyển
+    quyền phải hạ owner cũ trước rồi mới nâng người mới, nếu không sẽ lỗi 500."""
+    owner, _ = _register(pg_client, "alice")
+    _, bob_id = _register(pg_client, "bob")
+    workspace = pg_client.post("/api/v1/workspaces", json={"name": "Team"}, headers=owner).json()
+    url = f"/api/v1/workspaces/{workspace['id']}"
+    pg_client.post(f"{url}/members", json={"email": "bob@example.com"}, headers=owner)
+
+    resp = pg_client.post(f"{url}/transfer-ownership", json={"user_id": bob_id}, headers=owner)
+
+    roles = {m["user"]["full_name"]: m["role"] for m in resp.json()["members"]}
+    assert resp.status_code == 200
+    assert roles == {"alice": "EDITOR", "bob": "OWNER"}

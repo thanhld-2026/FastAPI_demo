@@ -1,13 +1,14 @@
 from fastapi import APIRouter, status
 from sqlalchemy.exc import IntegrityError
 
-from app import crud, permissions
+from app import crud
 from app.core import messages
-from app.core.exceptions import ForbiddenException, NotFoundException
+from app.core.exceptions import NotFoundException
 from app.core.responses import error_responses
 from app.dependencies import (
     CurrentUser,
     DbSession,
+    MemberRemovalWorkspace,
     OwnedWorkspace,
     Pagination,
     ReadableWorkspace,
@@ -17,6 +18,7 @@ from app.schemas.project import ProjectCreate, ProjectOut
 from app.schemas.workspace import (
     MemberInvite,
     MemberRoleUpdate,
+    OwnershipTransfer,
     WorkspaceCreate,
     WorkspaceDetail,
     WorkspaceMemberOut,
@@ -121,12 +123,24 @@ def change_member_role(
     responses=error_responses(400, 401, 403, 404),
 )
 def remove_member(
-    user_id: int, current_user: CurrentUser, workspace: ReadableWorkspace, db: DbSession
+    user_id: int, current_user: CurrentUser, workspace: MemberRemovalWorkspace, db: DbSession
 ):
-    role = crud.workspace.get_role(db, workspace.id, current_user.id)
-    if not permissions.can_remove_member(current_user, role, user_id):
-        raise ForbiddenException(messages.WORKSPACE_ROLE_REQUIRED.format(role="OWNER"))
     workspace_service.remove_member(db, workspace=workspace, user_id=user_id, actor=current_user)
+
+
+@router.post(
+    "/{workspace_id}/transfer-ownership",
+    response_model=WorkspaceDetail,
+    summary="[OWNER / Admin] Chuyển quyền owner cho 1 thành viên (owner cũ thành EDITOR)",
+    responses=error_responses(400, 401, 403, 404),
+)
+def transfer_ownership(
+    data: OwnershipTransfer, current_user: CurrentUser, workspace: OwnedWorkspace, db: DbSession
+):
+    workspace_service.transfer_ownership(
+        db, workspace=workspace, new_owner_id=data.user_id, actor=current_user
+    )
+    return crud.workspace.get_detail(db, workspace.id)
 
 
 # ---------- Project trong workspace ----------

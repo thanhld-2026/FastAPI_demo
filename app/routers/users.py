@@ -111,15 +111,7 @@ def admin_update_user(user_id: int, data: AdminUserUpdate, admin: AdminUser, db:
     responses=error_responses(401, 403, 404),
 )
 def get_profile(user_id: int, current_user: CurrentUser, db: DbSession):
-    profile = crud.user.get_profile(db, user_id, viewer=current_user)
-    if profile is None:
+    user = crud.user.get_profile(db, user_id, viewer=current_user)
+    if user is None:
         raise NotFoundException(messages.USER_NOT_FOUND)
-    user, created_projects, assigned_tasks = profile
-    return UserProfile(
-        id=user.id,
-        full_name=user.full_name,
-        bio=user.bio,
-        created_at=user.created_at,
-        created_projects=created_projects,
-        assigned_tasks=assigned_tasks,
-    )
+    return user

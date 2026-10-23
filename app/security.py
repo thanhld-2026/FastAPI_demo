@@ -31,25 +31,38 @@ def verify_password(password: str, hashed_password: str) -> bool:
 DUMMY_HASH = hash_password("dummy-password-for-timing-attack")
 
 
+# Claim `type`: sau này có JWT khác ký cùng SECRET_KEY (vd link đặt lại mật khẩu) thì token đó
+# không dùng thay access token được, vì decode_access_token chỉ nhận type "access".
+ACCESS_TOKEN_TYPE = "access"
+
+
+def access_token_lifetime() -> timedelta:
+    """Thời hạn access token: 1 nguồn duy nhất cho cả claim `exp` lẫn `expires_in` trả về client."""
+    return timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+
+
 def create_access_token(subject: str | int, expires_delta: timedelta | None = None) -> str:
     """Tạo JWT. `sub` (subject) là user id; `exp` là thời điểm hết hạn."""
     now = datetime.now(UTC)
-    expire = now + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
-    payload = {"sub": str(subject), "iat": now, "exp": expire}
+    expire = now + (expires_delta or access_token_lifetime())
+    payload = {"sub": str(subject), "type": ACCESS_TOKEN_TYPE, "iat": now, "exp": expire}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
-    """Giải mã + verify chữ ký + kiểm tra hạn (exp).
+    """Giải mã + verify chữ ký + kiểm tra hạn (exp) + đúng loại token (type = "access").
 
     Raise jwt.InvalidTokenError nếu token không hợp lệ.
     """
-    return jwt.decode(
+    payload = jwt.decode(
         token,
         settings.SECRET_KEY,
         algorithms=[settings.ALGORITHM],
-        options={"require": ["exp", "sub"]},
+        options={"require": ["exp", "sub", "type"]},
     )
+    if payload["type"] != ACCESS_TOKEN_TYPE:
+        raise jwt.InvalidTokenError("not an access token")
+    return payload
 
 
 def create_refresh_token() -> str:

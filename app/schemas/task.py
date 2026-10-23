@@ -4,7 +4,7 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel, Field, PositiveInt, model_validator
 
 from app.core import messages
-from app.core.constants import TASK_TITLE_MAX_LENGTH
+from app.core.constants import REQUIRED_TEXT_MIN_LENGTH, TASK_TITLE_MAX_LENGTH
 from app.models.enums import ActivityAction, TaskPriority, TaskStatus
 from app.schemas.common import InputSchema, ORMSchema, reject_null_fields
 from app.schemas.label import LabelOut
@@ -33,7 +33,7 @@ def _single_line(value: str) -> str:
 
 TaskTitle = Annotated[
     str,
-    Field(min_length=1, max_length=TASK_TITLE_MAX_LENGTH),
+    Field(min_length=REQUIRED_TEXT_MIN_LENGTH, max_length=TASK_TITLE_MAX_LENGTH),
     AfterValidator(_single_line),
 ]
 

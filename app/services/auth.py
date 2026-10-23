@@ -1,4 +1,4 @@
-"""Nghiệp vụ xác thực: đăng nhập, refresh token (rotation), logout, đổi mật khẩu.
+"""Nghiệp vụ xác thực: đăng ký, đăng nhập, refresh token (rotation), logout, đổi mật khẩu.
 
 Access token (JWT, 15 phút): không lưu DB, không thu hồi được -> để sống ngắn.
 Refresh token (chuỗi ngẫu nhiên, 7 ngày): lưu hash trong DB -> thu hồi được khi logout /
@@ -8,16 +8,28 @@ trỏ sang token mới (rotation).
 
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import crud
 from app.config import settings
 from app.core import messages
-from app.core.exceptions import BadRequestException, ForbiddenException, UnauthorizedException
+from app.core.exceptions import (
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    UnauthorizedException,
+)
 from app.models import RefreshToken, User
 from app.schemas.auth import TokenPair
-from app.schemas.user import PasswordChange
-from app.security import create_access_token, create_refresh_token, hash_token, verify_password
+from app.schemas.user import PasswordChange, UserCreate
+from app.security import (
+    access_token_lifetime,
+    create_access_token,
+    create_refresh_token,
+    hash_token,
+    verify_password,
+)
 
 
 def _is_expired(token: RefreshToken) -> bool:
@@ -33,10 +45,11 @@ def _new_token_pair(db: Session, user: User) -> tuple[TokenPair, RefreshToken]:
         token_hash=hash_token(raw_refresh),
         expires_at=datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
     )
+    lifetime = access_token_lifetime()  # cùng 1 giá trị cho `exp` trong JWT và `expires_in`
     pair = TokenPair(
-        access_token=create_access_token(user.id),
+        access_token=create_access_token(user.id, expires_delta=lifetime),
         refresh_token=raw_refresh,
-        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        expires_in=int(lifetime.total_seconds()),
     )
     return pair, stored
 
@@ -54,6 +67,18 @@ def _lock_user(db: Session, user_id: int) -> User:
 def _rotated_recently(token: RefreshToken) -> bool:
     grace = timedelta(seconds=settings.REFRESH_TOKEN_REUSE_GRACE_SECONDS)
     return token.revoked_at is not None and datetime.now(UTC) - token.revoked_at <= grace
+
+
+def register(db: Session, data: UserCreate) -> User:
+    if crud.user.get_by_email(db, data.email):
+        raise ConflictException(messages.EMAIL_TAKEN)
+    try:
+        return crud.user.create(db, data)
+    except IntegrityError:
+        # 2 request đăng ký cùng email gần như đồng thời: cả 2 đều qua bước kiểm tra
+        # ở trên, nhưng UNIQUE constraint trong DB vẫn chặn được request thứ 2.
+        db.rollback()
+        raise ConflictException(messages.EMAIL_TAKEN) from None
 
 
 def login(db: Session, email: str, password: str) -> TokenPair:

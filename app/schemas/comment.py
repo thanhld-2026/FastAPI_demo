@@ -2,14 +2,16 @@ from datetime import datetime
 
 from pydantic import Field
 
-from app.core.constants import COMMENT_MAX_LENGTH
+from app.core.constants import COMMENT_MAX_LENGTH, REQUIRED_TEXT_MIN_LENGTH
 from app.schemas.common import InputSchema, ORMSchema
 from app.schemas.user import UserPublic
 
 
 class CommentCreate(InputSchema):
     content: str = Field(
-        min_length=1, max_length=COMMENT_MAX_LENGTH, examples=["Mình đã review xong, LGTM!"]
+        min_length=REQUIRED_TEXT_MIN_LENGTH,
+        max_length=COMMENT_MAX_LENGTH,
+        examples=["Mình đã review xong, LGTM!"],
     )
 
 

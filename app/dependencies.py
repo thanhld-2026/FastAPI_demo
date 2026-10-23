@@ -130,15 +130,24 @@ def _authorize(
     _require_role(user, role, minimum)
 
 
+def _member_workspace(
+    db: Session, workspace_id: int, user: User
+) -> tuple[Workspace, WorkspaceRole | None]:
+    """Workspace trên URL + role của user trong đó, chỉ 1 lần đọc role.
+    404 nếu workspace không tồn tại hoặc user không phải thành viên (admin thì vẫn qua)."""
+    workspace = crud.workspace.get(db, workspace_id)
+    if workspace is None:
+        raise NotFoundException(messages.WORKSPACE_NOT_FOUND)
+    role = crud.workspace.get_role(db, workspace_id, user.id)
+    _require_member(user, role, messages.WORKSPACE_NOT_FOUND)
+    return workspace, role
+
+
 def workspace_access(minimum: WorkspaceRole) -> Callable[..., Workspace]:
     """Dependency có tham số (factory): workspace trên URL + user phải có ít nhất role `minimum`."""
 
     def dependency(workspace_id: int, user: CurrentUser, db: DbSession) -> Workspace:
-        workspace = crud.workspace.get(db, workspace_id)
-        if workspace is None:
-            raise NotFoundException(messages.WORKSPACE_NOT_FOUND)
-        role = crud.workspace.get_role(db, workspace_id, user.id)
-        _require_member(user, role, messages.WORKSPACE_NOT_FOUND)
+        workspace, role = _member_workspace(db, workspace_id, user)
         _require_role(user, role, minimum)
         return workspace
 
@@ -147,6 +156,21 @@ def workspace_access(minimum: WorkspaceRole) -> Callable[..., Workspace]:
 
 ReadableWorkspace = Annotated[Workspace, Depends(workspace_access(WorkspaceRole.VIEWER))]
 OwnedWorkspace = Annotated[Workspace, Depends(workspace_access(WorkspaceRole.OWNER))]
+
+
+def verify_member_remover(
+    workspace_id: int, user_id: int, user: CurrentUser, db: DbSession
+) -> Workspace:
+    """Xóa thành viên `user_id`: OWNER / admin xóa được người khác, thành viên tự rời được."""
+    workspace, role = _member_workspace(db, workspace_id, user)
+    if not permissions.can_remove_member(user, role, user_id):
+        raise ForbiddenException(
+            messages.WORKSPACE_ROLE_REQUIRED.format(role=WorkspaceRole.OWNER.value)
+        )
+    return workspace
+
+
+MemberRemovalWorkspace = Annotated[Workspace, Depends(verify_member_remover)]
 
 
 def _lock_project(db: Session, project_id: int) -> Project:

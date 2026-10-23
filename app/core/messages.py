@@ -25,7 +25,10 @@ MEMBER_NOT_FOUND = "Member not found"
 ALREADY_MEMBER = "User is already a member of this workspace"
 INVITEE_NOT_FOUND = "No active user with this email"
 OWNER_MEMBERSHIP_LOCKED = "The workspace owner cannot be removed or change role"
-OWNER_ROLE_NOT_ASSIGNABLE = "OWNER role cannot be assigned, a workspace has exactly one owner"
+OWNER_ROLE_NOT_ASSIGNABLE = (
+    "OWNER role cannot be assigned, a workspace has exactly one owner (use transfer-ownership)"
+)
+NEW_OWNER_NOT_MEMBER = "The new owner must be an active member of the workspace"
 
 # --- Project ---
 PROJECT_NOT_FOUND = "Project not found"
