@@ -2,11 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.exc import IntegrityError
 
-from app import crud
-from app.core import messages
-from app.core.exceptions import ConflictException
 from app.core.responses import error_responses
 from app.dependencies import DbSession
 from app.schemas.auth import RefreshTokenIn, TokenPair
@@ -24,15 +20,7 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
     responses=error_responses(409),
 )
 def register(data: UserCreate, db: DbSession):
-    if crud.user.get_by_email(db, data.email):
-        raise ConflictException(messages.EMAIL_TAKEN)
-    try:
-        return crud.user.create(db, data)
-    except IntegrityError:
-        # 2 request đăng ký cùng email gần như đồng thời: cả 2 đều qua bước kiểm tra
-        # ở trên, nhưng UNIQUE constraint trong DB vẫn chặn được request thứ 2.
-        db.rollback()
-        raise ConflictException(messages.EMAIL_TAKEN) from None
+    return auth_service.register(db, data)
 
 
 @router.post(

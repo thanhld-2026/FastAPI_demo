@@ -75,11 +75,14 @@ Phiên đăng nhập gồm 2 token:
 - Logout (kể cả bằng token cũ đã bị đổi) kết thúc cả phiên đó. Đổi mật khẩu thu hồi mọi phiên
   và trả cặp token mới cho thiết bị hiện tại. Admin khóa tài khoản cũng thu hồi mọi phiên.
 - Refresh / logout / đổi mật khẩu / khóa tài khoản của cùng 1 user chạy tuần tự (khóa dòng user).
+- Access token có claim `type: "access"`: JWT khác ký cùng `SECRET_KEY` không dùng thay được.
+- Chưa có rate limit cho login / refresh / đổi mật khẩu (chống dò mật khẩu): dự định làm sau bằng
+  Redis (đếm số lần theo IP + email trong 1 khoảng thời gian, quá ngưỡng trả `429`).
 
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 120 test (+6 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 121 test (+6 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 # Test khóa dòng (FOR SHARE / FOR UPDATE) cần PostgreSQL thật, DB rỗng dành riêng cho test:
 # (test xóa / tạo lại toàn bộ bảng nên tên DB bắt buộc kết thúc bằng _test, nếu không test dừng ngay)
