@@ -1,5 +1,11 @@
 """Mục 2, 3, 5: CRUD project, nested response, phân quyền PM."""
 
+import pytest
+
+from app.core.exceptions import ConflictException
+from app.dependencies import _raise_if_not_writable
+from app.models import ProjectStatus
+
 
 def test_create_project_requires_login(client):
     resp = client.post("/api/v1/projects", json={"name": "TaskHub"})
@@ -182,20 +188,86 @@ def test_archived_project_itself_cannot_be_changed_or_deleted(
     assert client.get(f"/api/v1/tasks/{task['id']}").status_code == 200  # task không bị xóa theo
 
 
-def test_error_order_on_archived_project(client, make_user, make_project, make_task):
-    """401 (chưa đăng nhập) -> 404 -> 409 (archive) -> 403 (không đủ quyền)."""
+# Mọi endpoint ghi: (method, path, body, mã cho người không có quyền khi project ARCHIVED / ACTIVE).
+# Tạo task / thêm comment thì user nào đăng nhập cũng được, nên lúc ACTIVE là 201.
+WRITE_ENDPOINTS = [
+    pytest.param("PUT", "/tasks/{task}", {"status": "DONE"}, 409, 403, id="update-task"),
+    pytest.param("DELETE", "/tasks/{task}", None, 409, 403, id="delete-task"),
+    pytest.param("POST", "/tasks/{task}/assign", {"assignee_id": None}, 409, 403, id="assign"),
+    pytest.param("POST", "/tasks/{task}/comments", {"content": "hi"}, 409, 201, id="add-comment"),
+    pytest.param(
+        "PUT", "/tasks/{task}/comments/{comment}", {"content": "x"}, 409, 403, id="edit-comment"
+    ),
+    pytest.param("DELETE", "/tasks/{task}/comments/{comment}", None, 409, 403, id="delete-comment"),
+    pytest.param("POST", "/projects/{project}/tasks", {"title": "X"}, 409, 201, id="create-task"),
+    pytest.param("PUT", "/projects/{project}", {"name": "X"}, 409, 403, id="update-project"),
+    pytest.param("DELETE", "/projects/{project}", None, 409, 403, id="delete-project"),
+    # archive / unarchive chạy được ở mọi status nên không có 409
+    pytest.param("POST", "/projects/{project}/archive", None, 403, 403, id="archive"),
+    pytest.param("POST", "/projects/{project}/unarchive", None, 403, 403, id="unarchive"),
+]
+
+
+@pytest.mark.parametrize(("method", "path", "body", "on_archived", "on_active"), WRITE_ENDPOINTS)
+def test_error_order_of_write_endpoints(
+    client, make_user, make_project, make_task, method, path, body, on_archived, on_active
+):
+    """401 (chưa đăng nhập) -> 404 (không có resource) -> 409 (project archive) -> 403 (quyền)."""
     pm = make_user("pmuser")
-    stranger = make_user("stranger")
+    stranger = make_user("stranger")  # không phải PM, không tạo task / comment nào
     project = make_project(pm)
     task = make_task(project["id"], pm)
+    comment = client.post(
+        f"/api/v1/tasks/{task['id']}/comments", json={"content": "by pm"}, headers=pm["headers"]
+    ).json()
+    url = "/api/v1" + path.format(project=project["id"], task=task["id"], comment=comment["id"])
+    missing_url = "/api/v1" + path.format(project=999, task=999, comment=999)
+    project_url = f"/api/v1/projects/{project['id']}"
+
+    def call(target: str, user: dict | None = None):
+        headers = user["headers"] if user else {}
+        return client.request(method, target, json=body, headers=headers)
+
+    anonymous = call(url)
+    missing = call(missing_url, stranger)
+    client.post(f"{project_url}/archive", headers=pm["headers"])
+    archived = call(url, stranger)
+    client.post(f"{project_url}/unarchive", headers=pm["headers"])
+    active = call(url, stranger)
+
+    codes = [r.status_code for r in (anonymous, missing, archived, active)]
+    assert codes == [401, 404, on_archived, on_active]
+
+
+def test_only_active_projects_accept_writes():
+    """Allow-list: chỉ ACTIVE ghi được. Status thêm sau này (vd "ON_HOLD") mặc định là chỉ đọc,
+    không vô tình thành ghi được như khi chỉ chặn đúng ARCHIVED."""
+    _raise_if_not_writable(ProjectStatus.ACTIVE, "not found")  # không lỗi
+    for status in (ProjectStatus.ARCHIVED, "ON_HOLD"):
+        with pytest.raises(ConflictException):
+            _raise_if_not_writable(status, "not found")  # type: ignore[arg-type]
+
+
+def test_bookmark_and_admin_tag_delete_still_work_on_archived_project(
+    client, make_user, make_project, make_task, make_tag
+):
+    """2 ngoại lệ có chủ đích của quy tắc archive (xem dependencies.py): bookmark là dữ liệu cá
+    nhân; tag dùng chung toàn hệ thống nên admin vẫn xóa được, task archive mất tag đó."""
+    pm = make_user("pmuser")
+    admin = make_user("boss", admin=True)
+    tag = make_tag("legacy")
+    project = make_project(pm)
+    task = make_task(project["id"], pm, tag_ids=[tag["id"]])
     task_url = f"/api/v1/tasks/{task['id']}"
     client.post(f"/api/v1/projects/{project['id']}/archive", headers=pm["headers"])
 
-    anonymous = client.put(task_url, json={"status": "DONE"})
-    missing = client.put("/api/v1/tasks/999", json={"status": "DONE"}, headers=stranger["headers"])
-    by_stranger = client.put(task_url, json={"status": "DONE"}, headers=stranger["headers"])
+    bookmarked = client.post(f"{task_url}/bookmark", headers=pm["headers"])
+    unbookmarked = client.delete(f"{task_url}/bookmark", headers=pm["headers"])
+    tag_deleted = client.delete(f"/api/v1/tags/{tag['id']}", headers=admin["headers"])
 
-    assert (anonymous.status_code, missing.status_code, by_stranger.status_code) == (401, 404, 409)
+    codes = (bookmarked.status_code, unbookmarked.status_code, tag_deleted.status_code)
+    assert codes == (200, 200, 204)
+    assert client.get(task_url).json()["tags"] == []
 
 
 def test_filter_projects_by_status(client, make_user, make_project):

@@ -64,9 +64,10 @@ Tất cả dùng chung mật khẩu **`Password123`**.
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 82 test (+3 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 94 test (+5 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 # Test khóa dòng (FOR SHARE / FOR UPDATE) cần PostgreSQL thật, DB rỗng dành riêng cho test:
+# (test xóa / tạo lại toàn bộ bảng nên tên DB bắt buộc kết thúc bằng _test, nếu không test dừng ngay)
 TEST_POSTGRES_URL=postgresql+psycopg://taskhub:taskhub@localhost:5432/taskhub_test pytest -m postgres
 ruff check .    # lint (cấu hình trong pyproject.toml)
 mypy            # kiểm tra kiểu cho app/ và scripts/
@@ -132,8 +133,10 @@ Quy ước:
   response có `total` và `pages` (tổng số trang, tối thiểu 1). `page` vượt quá `pages` trả
   `items` rỗng. Tham số cũ `skip` bị từ chối (422) để client cũ không âm thầm nhận mãi trang 1.
 - Task: status `TODO` / `IN_PROGRESS` / `IN_REVIEW` / `DONE`, priority `LOW` / `MEDIUM` / `HIGH` / `URGENT`.
-- Project: `ACTIVE` / `ARCHIVED`. Project đã archive thì chính project, task và comment bên trong
-  chỉ đọc được (mọi thao tác ghi, kể cả sửa / xóa project, trả `409`), PM / Admin unarchive để mở lại.
+- Project: `ACTIVE` / `ARCHIVED`. Chỉ project `ACTIVE` mới ghi được: project đã archive thì chính
+  project, task và comment bên trong chỉ đọc được (mọi thao tác ghi, kể cả sửa / xóa project, trả
+  `409`), PM / Admin unarchive để mở lại. 2 ngoại lệ có chủ đích: bookmark (dữ liệu cá nhân) và admin
+  xóa tag (tag dùng chung toàn hệ thống, task trong project archive mất tag đó).
 - Cột "Mục đề": số mục của tutorial; `PL n` là feature n trong phụ lục đặc tả sample app.
 
 | Method | Endpoint | Quyền | Mục đề |

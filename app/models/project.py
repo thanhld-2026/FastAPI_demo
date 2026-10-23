@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import ForeignKey, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import PROJECT_NAME_MAX_LENGTH
@@ -17,6 +17,10 @@ if TYPE_CHECKING:
 
 class Project(TimestampMixin, Base):
     __tablename__ = "projects"
+    # GET /projects?status=... lọc theo status rồi ORDER BY id: index ghép (status, id) cho DB đọc
+    # thẳng các dòng đúng status theo thứ tự id. Index đơn trên status (chỉ 2 giá trị) gần như
+    # không được dùng: 1 giá trị chiếm phần lớn bảng thì quét bảng còn nhanh hơn.
+    __table_args__ = (Index("ix_projects_status_id", "status", "id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(PROJECT_NAME_MAX_LENGTH), index=True)
@@ -25,7 +29,6 @@ class Project(TimestampMixin, Base):
         enum_column(ProjectStatus),
         default=ProjectStatus.ACTIVE,
         server_default=ProjectStatus.ACTIVE.value,
-        index=True,
     )
     # Người tạo project = Project Manager (PM) của project đó
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
