@@ -9,6 +9,9 @@ thì input hợp lệ vẫn có thể bị DB từ chối.
 # (URL cũ không có version `/api/...` đã bỏ hẳn, gọi vào trả 404.)
 API_V1_PREFIX = "/api/v1"
 
+# --- Chuỗi bắt buộc: không được rỗng (sau khi đã cắt khoảng trắng 2 đầu) ---
+REQUIRED_TEXT_MIN_LENGTH = 1
+
 # --- User ---
 EMAIL_MAX_LENGTH = 255
 PASSWORD_HASH_MAX_LENGTH = 255  # chuỗi bcrypt dài 60, để dư cho thuật toán khác
@@ -21,6 +24,9 @@ PASSWORD_MAX_BYTES = 72  # giới hạn của bcrypt, tính theo BYTES chứ kh�
 REFRESH_TOKEN_BYTES = 32  # độ dài ngẫu nhiên trước khi encode base64 (~43 ký tự)
 REFRESH_TOKEN_MAX_LENGTH = 128  # giới hạn input client gửi lên
 TOKEN_HASH_LENGTH = 64  # SHA-256 dạng hex
+
+# --- Workspace ---
+WORKSPACE_NAME_MAX_LENGTH = 100
 
 # --- Project ---
 PROJECT_NAME_MAX_LENGTH = 100

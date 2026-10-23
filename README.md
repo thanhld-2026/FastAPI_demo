@@ -52,12 +52,12 @@ uvicorn app.main:app --reload           # http://localhost:8000/docs
 
 Tất cả dùng chung mật khẩu **`Password123`**.
 
-| Email | Vai trò |
-|---|---|
-| `admin@example.com` | Admin hệ thống, làm được mọi thứ |
-| `alice@example.com` | PM của project **TaskHub Backend** (task 1–6) |
-| `bob@example.com` | PM của project **TaskHub Mobile** (task 7–9) |
-| `carol@example.com`, `dave@example.com` | Member, được assign một số task |
+| Email | Workspace **Backend Team** (project TaskHub Backend, task 1–6) | Workspace **Mobile Team** (project TaskHub Mobile, task 7–9) |
+|---|---|---|
+| `admin@example.com` | Admin hệ thống: làm được mọi thứ ở mọi workspace | |
+| `alice@example.com` | OWNER | không phải thành viên |
+| `bob@example.com` | VIEWER | OWNER |
+| `carol@example.com`, `dave@example.com` | EDITOR | EDITOR |
 
 Đăng nhập bằng **email** (theo đặc tả, user không có username). Trên Swagger bấm **Authorize**,
 ô `username` của form OAuth2 nhập email (tên field do chuẩn OAuth2 quy định).
@@ -82,7 +82,7 @@ Phiên đăng nhập gồm 2 token:
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 110 test (+5 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 124 test (+7 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 # Test khóa dòng (FOR SHARE / FOR UPDATE) cần PostgreSQL thật, DB rỗng dành riêng cho test:
 # (test xóa / tạo lại toàn bộ bảng nên tên DB bắt buộc kết thúc bằng _test, nếu không test dừng ngay)
@@ -125,7 +125,7 @@ Client ──HTTP──▶ CORS middleware ──▶ Log middleware (request id,
                                           │
                                           ▼
                      Router (app/routers)  ◀── Dependencies: get_db, get_current_user,
-                     - validate input bằng      verify_project_manager, verify_task_editor,
+                     - validate input bằng      project_access(role), task_access(role),
                        Pydantic schema          Pagination, ... (lỗi -> AppException)
                      - kiểm tra quyền (permissions.py)
                                           │
@@ -144,8 +144,19 @@ Client ──HTTP──▶ CORS middleware ──▶ Log middleware (request id,
 
 Quy ước:
 
-- Các API **đọc** (GET) công khai, các API **ghi** đều cần đăng nhập. PM là người tạo project.
-  Khi làm RBAC theo workspace (phụ lục đặc tả), quyền đọc sẽ theo membership và cần đăng nhập.
+- Mọi API (trừ register / login / refresh / logout, `/health`) cần đăng nhập. Dữ liệu nằm trong
+  **workspace**; quyền đi theo role trong workspace (RBAC, bảng quyền ở `app/permissions.py`):
+  - `VIEWER`: đọc mọi thứ trong workspace, bookmark task.
+  - `EDITOR`: + tạo / sửa / assign task, comment; xóa task / sửa, xóa comment **của mình**.
+  - `OWNER` (người tạo workspace, mỗi workspace đúng 1 người, DB chặn bằng partial unique index;
+    chuyển được cho thành viên khác): + quản lý project, thành viên, workspace, xóa task / comment
+    của người khác.
+  - Admin hệ thống làm được mọi thứ ở mọi workspace.
+- Không phải thành viên → `404` (không lộ resource có tồn tại hay không); là thành viên nhưng role
+  không đủ → `403`. Thứ tự lỗi: 401 → 404 → 409 (project đã archive) → 403.
+- Chỉ giao task cho thành viên từ `EDITOR` trở lên. Thành viên rời / bị xóa khỏi workspace hoặc
+  bị hạ xuống `VIEWER` thì task của họ trong các project `ACTIVE` được bỏ assign (có ghi activity);
+  project đã archive giữ nguyên. Email báo comment chỉ gửi cho người còn trong workspace.
 - Mọi API nằm dưới prefix `/api/v1`.
 - Danh sách phân trang bằng `page` (1 tới 10 000) + `limit` (mặc định 20, tối đa 100),
   response có `total` và `pages` (tổng số trang, tối thiểu 1). `page` vượt quá `pages` trả
@@ -153,7 +164,7 @@ Quy ước:
 - Task: status `TODO` / `IN_PROGRESS` / `IN_REVIEW` / `DONE`, priority `LOW` / `MEDIUM` / `HIGH` / `URGENT`.
 - Project: `ACTIVE` / `ARCHIVED`. Chỉ project `ACTIVE` mới ghi được: project đã archive thì chính
   project, task và comment bên trong chỉ đọc được (mọi thao tác ghi, kể cả sửa / xóa project, trả
-  `409`), PM / Admin unarchive để mở lại. 2 ngoại lệ có chủ đích: bookmark (dữ liệu cá nhân) và admin
+  `409`), OWNER / Admin unarchive để mở lại. 2 ngoại lệ có chủ đích: bookmark (dữ liệu cá nhân) và admin
   xóa tag (tag dùng chung toàn hệ thống, task trong project archive mất tag đó).
 - Cột "Mục đề": số mục của tutorial; `PL n` là feature n trong phụ lục đặc tả sample app.
 
@@ -166,34 +177,48 @@ Quy ước:
 | GET / PATCH | `/api/v1/users/me` | Đã đăng nhập | 4, PL 2 |
 | PUT | `/api/v1/users/me/password` | Đã đăng nhập, cần mật khẩu hiện tại (trả cặp token mới) | PL 2 |
 | GET | `/api/v1/users/me/bookmarks` | Đã đăng nhập (phân trang) | 5 |
-| GET | `/api/v1/users/{user_id}/profile` | Công khai | 3 |
+| GET | `/api/v1/users/{user_id}/profile` | Đã đăng nhập (chỉ hiện dữ liệu ở workspace chung) | 3 |
 | GET | `/api/v1/users` | Admin | 5 |
 | PATCH | `/api/v1/users/{user_id}` | Admin (đổi role, khóa tài khoản) | 5 |
-| GET | `/api/v1/projects?status=` | Công khai (lọc theo status + phân trang) | 2, PL 4 |
-| POST | `/api/v1/projects` | Đã đăng nhập (người tạo thành PM) | 2 |
-| GET | `/api/v1/projects/{project_id}` | Công khai (kèm tasks lồng nhau) | 2, 3 |
-| PUT / DELETE | `/api/v1/projects/{project_id}` | PM / Admin | 5 |
-| POST | `/api/v1/projects/{project_id}/archive`, `.../unarchive` | PM / Admin (idempotent) | PL 4 |
-| GET | `/api/v1/projects/{project_id}/tasks` | Công khai (lọc + phân trang) | 3, 5 |
-| POST | `/api/v1/projects/{project_id}/tasks` | Đã đăng nhập | 3 |
-| GET | `/api/v1/tasks?status=&priority=&project_id=&assignee_id=&q=` | Công khai (lọc + phân trang) | 5 |
-| GET | `/api/v1/tasks/{task_id}` | Công khai | 3 |
-| PUT | `/api/v1/tasks/{task_id}` | Người tạo / người được assign / PM / Admin | 6 |
-| DELETE | `/api/v1/tasks/{task_id}` | Người tạo / PM / Admin | 6 |
-| POST | `/api/v1/tasks/{task_id}/assign` | PM / Admin | 6 |
-| POST / DELETE | `/api/v1/tasks/{task_id}/bookmark` | Đã đăng nhập | 5 |
-| GET | `/api/v1/tasks/{task_id}/activities` | Công khai (phân trang) | 6 |
-| GET / POST | `/api/v1/tasks/{task_id}/comments` | GET công khai (phân trang), POST cần đăng nhập (gửi email ngầm) | 6, 7 |
-| PUT / DELETE | `/api/v1/tasks/{task_id}/comments/{comment_id}` | Tác giả / PM / Admin | 6 |
-| GET | `/api/v1/tags` | Công khai (cache Redis) | 2, 7 |
+| POST | `/api/v1/workspaces` | Đã đăng nhập (người tạo là OWNER) | PL 3 |
+| GET | `/api/v1/workspaces` | Workspace tôi là thành viên (admin: tất cả) | PL 3 |
+| GET | `/api/v1/workspaces/{workspace_id}` | VIEWER (kèm danh sách thành viên) | PL 3 |
+| PATCH / DELETE | `/api/v1/workspaces/{workspace_id}` | OWNER (xóa: phải hết project, nếu không 409) | PL 3 |
+| POST | `/api/v1/workspaces/{workspace_id}/members` | OWNER, mời theo email, role EDITOR / VIEWER | PL 3 |
+| PATCH | `/api/v1/workspaces/{workspace_id}/members/{user_id}` | OWNER, đổi role | PL 3 |
+| DELETE | `/api/v1/workspaces/{workspace_id}/members/{user_id}` | OWNER, hoặc tự rời workspace | PL 3 |
+| POST | `/api/v1/workspaces/{workspace_id}/transfer-ownership` | OWNER / Admin, chuyển cho 1 thành viên đang hoạt động (owner cũ thành EDITOR) | PL 3 |
+| POST | `/api/v1/workspaces/{workspace_id}/projects` | OWNER | 2, PL 4 |
+| GET | `/api/v1/projects?status=&workspace_id=` | Project trong workspace của tôi (lọc + phân trang) | 2, PL 4 |
+| GET | `/api/v1/projects/{project_id}` | VIEWER (kèm tasks lồng nhau) | 2, 3 |
+| PUT / DELETE | `/api/v1/projects/{project_id}` | OWNER | 5, PL 4 |
+| POST | `/api/v1/projects/{project_id}/archive`, `.../unarchive` | OWNER (idempotent) | PL 4 |
+| GET | `/api/v1/projects/{project_id}/tasks` | VIEWER (lọc + phân trang) | 3, 5 |
+| POST | `/api/v1/projects/{project_id}/tasks` | EDITOR | 3 |
+| GET | `/api/v1/tasks?status=&priority=&project_id=&assignee_id=&q=` | Task trong workspace của tôi (lọc + phân trang) | 5 |
+| GET | `/api/v1/tasks/{task_id}` | VIEWER | 3 |
+| PUT | `/api/v1/tasks/{task_id}` | EDITOR | 6 |
+| DELETE | `/api/v1/tasks/{task_id}` | Người tạo (EDITOR) / OWNER | 6 |
+| POST | `/api/v1/tasks/{task_id}/assign` | EDITOR | 6 |
+| POST / DELETE | `/api/v1/tasks/{task_id}/bookmark` | VIEWER | 5 |
+| GET | `/api/v1/tasks/{task_id}/activities` | VIEWER (phân trang) | 6 |
+| GET / POST | `/api/v1/tasks/{task_id}/comments` | GET: VIEWER (phân trang), POST: EDITOR (gửi email ngầm) | 6, 7 |
+| PUT / DELETE | `/api/v1/tasks/{task_id}/comments/{comment_id}` | Tác giả (EDITOR) / OWNER | 6 |
+| GET | `/api/v1/tags` | Đã đăng nhập (cache Redis) | 2, 7 |
 | POST / DELETE | `/api/v1/tags`, `/api/v1/tags/{tag_id}` | Admin | 7 |
 | GET | `/health` | Công khai | 8 |
 
 Lỗi luôn trả về dạng `{"detail": "..."}`, mã lỗi của từng endpoint được document trên Swagger:
 
 - `401`: chưa đăng nhập hoặc token sai/hết hạn.
-- `403`: đã đăng nhập nhưng không đủ quyền.
-- `404`: resource trên URL không tồn tại.
+- `403`: là thành viên nhưng role không đủ (hoặc tài khoản bị khóa).
+- `404`: resource trên URL không tồn tại, hoặc không phải thành viên workspace chứa nó.
 - `400`: body tham chiếu tới dữ liệu không tồn tại (tag_ids, assignee_id).
 - `409`: trùng dữ liệu (email, tag) hoặc project đã archive.
 - `422`: dữ liệu sai định dạng.
+
+Giới hạn / quyết định có chủ đích:
+
+- Mời thành viên theo email là thêm thẳng (không cần người được mời đồng ý, họ tự rời được), và
+  ai tạo workspace cũng biết được 1 email đã đăng ký hay chưa (400 khác 201). Chấp nhận trong phạm vi
+  bài thực hành; bản đầy đủ cần lời mời chờ chấp nhận + cùng 1 response cho mọi email.

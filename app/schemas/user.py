@@ -9,6 +9,7 @@ from app.core.constants import (
     FULL_NAME_MAX_LENGTH,
     PASSWORD_MAX_BYTES,
     PASSWORD_MIN_LENGTH,
+    REQUIRED_TEXT_MIN_LENGTH,
 )
 from app.models.enums import UserRole
 from app.schemas.common import InputSchema, ORMSchema, reject_null_fields
@@ -30,7 +31,9 @@ Password = Annotated[
     Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_BYTES),
     AfterValidator(_check_bcrypt_limit),
 ]
-FullName = Annotated[str, Field(min_length=1, max_length=FULL_NAME_MAX_LENGTH)]
+FullName = Annotated[
+    str, Field(min_length=REQUIRED_TEXT_MIN_LENGTH, max_length=FULL_NAME_MAX_LENGTH)
+]
 
 
 # ---------- Input ----------

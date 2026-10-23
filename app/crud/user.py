@@ -1,7 +1,8 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Task, User, UserRole
+from app.crud.workspace import visible_to
+from app.models import Project, Task, User, UserRole
 from app.schemas.common import PageParams
 from app.schemas.user import AdminUserUpdate, UserCreate, UserUpdate
 from app.security import DUMMY_HASH, hash_password, verify_password
@@ -82,14 +83,28 @@ def list_users(db: Session, pagination: PageParams) -> tuple[list[User], int]:
     return list(users), total
 
 
-def get_profile(db: Session, user_id: int) -> User | None:
-    """User kèm project đang quản lý + task được giao, load sẵn trong 3 query cố định."""
+def get_profile(db: Session, user_id: int, *, viewer: User) -> User | None:
+    """User kèm project user đã tạo + task user được giao, load sẵn (3 query cố định).
+
+    Chỉ giữ project / task trong workspace mà `viewer` cũng là thành viên (admin: tất cả): profile
+    không được làm lộ dữ liệu của workspace người xem không có quyền. Điều kiện lọc gắn thẳng vào
+    relationship bằng `.and_(...)` (loader criteria), nên trả về object User và để schema
+    UserProfile tự đọc field (thêm field vào schema không phải sửa ở đây).
+
+    Lưu ý: 2 collection của object này chỉ chứa phần đã lọc, chỉ dùng để trả response.
+    populate_existing: lỡ object User đã có trong session (xem profile của chính mình) thì vẫn
+    nạp lại collection theo điều kiện lọc.
+    """
+    visible_projects = select(Project.id).where(visible_to(viewer, Project.workspace_id))
     stmt = (
         select(User)
         .where(User.id == user_id)
         .options(
-            selectinload(User.owned_projects),
-            selectinload(User.assigned_tasks).joinedload(Task.assignee),
+            selectinload(User.created_projects.and_(visible_to(viewer, Project.workspace_id))),
+            selectinload(User.assigned_tasks.and_(Task.project_id.in_(visible_projects))).joinedload(
+                Task.assignee
+            ),
         )
+        .execution_options(populate_existing=True)
     )
     return db.scalar(stmt)

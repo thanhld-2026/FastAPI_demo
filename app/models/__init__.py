@@ -7,12 +7,20 @@
 from app.models.activity import TaskActivity
 from app.models.associations import task_bookmarks, task_tags
 from app.models.comment import Comment
-from app.models.enums import ActivityAction, ProjectStatus, TaskPriority, TaskStatus, UserRole
+from app.models.enums import (
+    ActivityAction,
+    ProjectStatus,
+    TaskPriority,
+    TaskStatus,
+    UserRole,
+    WorkspaceRole,
+)
 from app.models.project import Project
 from app.models.refresh_token import RefreshToken
 from app.models.tag import Tag
 from app.models.task import Task
 from app.models.user import User
+from app.models.workspace import Workspace, WorkspaceMember
 
 __all__ = [
     "ActivityAction",
@@ -27,6 +35,9 @@ __all__ = [
     "TaskStatus",
     "User",
     "UserRole",
+    "Workspace",
+    "WorkspaceMember",
+    "WorkspaceRole",
     "task_bookmarks",
     "task_tags",
 ]

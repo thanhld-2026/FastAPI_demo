@@ -7,7 +7,7 @@ from app.config import settings
 from app.core import messages
 from app.core.exceptions import ConflictException
 from app.core.responses import error_responses
-from app.dependencies import DbSession, TagDep, verify_admin_role
+from app.dependencies import DbSession, TagDep, get_current_active_user, verify_admin_role
 from app.schemas.tag import TagCreate, TagOut
 
 router = APIRouter(prefix="/tags", tags=["Tags"])
@@ -15,7 +15,14 @@ router = APIRouter(prefix="/tags", tags=["Tags"])
 TAGS_CACHE_KEY = "taskhub:tags:all"
 
 
-@router.get("", response_model=list[TagOut], summary="Danh sách tag (có cache Redis)")
+@router.get(
+    "",
+    response_model=list[TagOut],
+    # Như mọi API đọc dữ liệu khác: phải đăng nhập
+    dependencies=[Depends(get_current_active_user)],
+    summary="Danh sách tag (có cache Redis)",
+    responses=error_responses(401, 403),
+)
 def list_tags(db: DbSession, response: Response):
     """Cache-aside: đọc cache trước; miss thì đọc DB rồi ghi lại vào cache.
 

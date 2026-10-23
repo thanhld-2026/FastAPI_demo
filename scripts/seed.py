@@ -23,6 +23,9 @@ from app.models import (
     TaskStatus,
     User,
     UserRole,
+    Workspace,
+    WorkspaceMember,
+    WorkspaceRole,
 )
 from app.security import hash_password
 
@@ -31,10 +34,16 @@ PASSWORD = "Password123"
 USERS = [
     # tên ngắn (email = <tên>@example.com), full_name, role
     ("admin", "System Admin", UserRole.ADMIN),
-    ("alice", "Alice Nguyen", UserRole.MEMBER),  # PM của project "TaskHub Backend"
-    ("bob", "Bob Tran", UserRole.MEMBER),  # PM của project "TaskHub Mobile"
-    ("carol", "Carol Le", UserRole.MEMBER),
-    ("dave", "Dave Pham", UserRole.MEMBER),
+    ("alice", "Alice Nguyen", UserRole.MEMBER),  # OWNER của workspace "Backend Team"
+    ("bob", "Bob Tran", UserRole.MEMBER),  # OWNER "Mobile Team", VIEWER ở "Backend Team"
+    ("carol", "Carol Le", UserRole.MEMBER),  # EDITOR ở cả 2 workspace
+    ("dave", "Dave Pham", UserRole.MEMBER),  # EDITOR ở cả 2 workspace
+]
+
+WORKSPACES = [
+    # tên workspace, owner, các thành viên khác (tên ngắn, role)
+    ("Backend Team", "alice", [("carol", "EDITOR"), ("dave", "EDITOR"), ("bob", "VIEWER")]),
+    ("Mobile Team", "bob", [("carol", "EDITOR"), ("dave", "EDITOR")]),
 ]
 
 TAGS = ["backend", "frontend", "mobile", "bug", "feature", "docs", "urgent"]
@@ -62,15 +71,27 @@ def seed() -> None:
         # Flush từng bước để id sinh ra theo đúng thứ tự khai báo, dễ theo dõi khi demo.
         db.flush()
 
+        workspaces = []
+        for ws_name, owner, others in WORKSPACES:
+            workspace = Workspace(name=ws_name, owner=users[owner])
+            workspace.members.append(WorkspaceMember(user=users[owner], role=WorkspaceRole.OWNER))
+            for name, role in others:
+                workspace.members.append(WorkspaceMember(user=users[name], role=WorkspaceRole(role)))
+            workspaces.append(workspace)
+        db.add_all(workspaces)
+        db.flush()
+
         backend = Project(
             name="TaskHub Backend",
             description="RESTful API cho TaskHub, xây dựng bằng FastAPI",
-            owner=users["alice"],
+            workspace=workspaces[0],
+            creator=users["alice"],
         )
         mobile = Project(
             name="TaskHub Mobile",
             description="Ứng dụng mobile gọi TaskHub API",
-            owner=users["bob"],
+            workspace=workspaces[1],
+            creator=users["bob"],
         )
         db.add_all([backend, mobile])
         db.flush()
@@ -80,7 +101,7 @@ def seed() -> None:
             # project, title, status, priority, creator, assignee, tags, due_in_days
             (backend, "Thiết kế database & ERD", TaskStatus.DONE, TaskPriority.HIGH, "alice", "carol", ["backend", "docs"], -7),
             (backend, "API đăng ký / đăng nhập JWT", TaskStatus.DONE, TaskPriority.HIGH, "alice", "carol", ["backend", "feature"], -3),
-            (backend, "Phân quyền PM / Admin", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, "alice", "dave", ["backend", "feature"], 2),
+            (backend, "Phân quyền theo workspace (RBAC)", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, "alice", "dave", ["backend", "feature"], 2),
             (backend, "Cache danh sách tag bằng Redis", TaskStatus.TODO, TaskPriority.MEDIUM, "carol", None, ["backend"], 5),
             (backend, "Viết integration test", TaskStatus.IN_REVIEW, TaskPriority.MEDIUM, "alice", "dave", ["backend", "docs"], 7),
             (backend, "Fix lỗi 500 khi token hết hạn", TaskStatus.TODO, TaskPriority.HIGH, "dave", None, ["bug", "urgent"], 1),
@@ -105,7 +126,7 @@ def seed() -> None:
             if assignee:
                 task.activities.append(
                     TaskActivity(
-                        actor=project.owner,
+                        actor=project.workspace.owner,
                         action=ActivityAction.ASSIGNED,
                         detail=f"assigned to {assignee}",
                     )
@@ -130,6 +151,9 @@ def seed() -> None:
         print(f"Seed data created. Accounts (password: {PASSWORD}):")
         for name, _, role in USERS:
             print(f"  - {name + '@example.com':<18} ({role.value})")
+        for ws_name, owner, others in WORKSPACES:
+            members = ", ".join(f"{name} {role}" for name, role in others)
+            print(f"Workspace {ws_name!r}: {owner} OWNER, {members}")
     finally:
         db.close()
 

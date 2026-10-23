@@ -5,10 +5,10 @@ from app.core.responses import error_responses
 from app.dependencies import (
     CurrentUser,
     DbSession,
-    ExistingTaskId,
+    EditableTask,
     ModifiableComment,
     Pagination,
-    WritableTask,
+    ReadableTaskId,
 )
 from app.schemas.comment import CommentCreate, CommentOut, CommentUpdate
 from app.schemas.common import Page
@@ -21,9 +21,9 @@ router = APIRouter(prefix="/tasks/{task_id}/comments", tags=["Comments"])
     "",
     response_model=Page[CommentOut],
     summary="Danh sách comment của task",
-    responses=error_responses(404),
+    responses=error_responses(401, 403, 404),
 )
-def list_comments(task_id: ExistingTaskId, db: DbSession, pagination: Pagination):
+def list_comments(task_id: ReadableTaskId, db: DbSession, pagination: Pagination):
     items, total = crud.comment.list_for_task(db, task_id, pagination)
     return Page.build(items, total, pagination)
 
@@ -32,13 +32,13 @@ def list_comments(task_id: ExistingTaskId, db: DbSession, pagination: Pagination
     "",
     response_model=CommentOut,
     status_code=status.HTTP_201_CREATED,
-    summary="Thêm comment (gửi email thông báo chạy ngầm)",
+    summary="[EDITOR] Thêm comment (gửi email thông báo chạy ngầm)",
     responses=error_responses(401, 403, 404, 409),
 )
 def create_comment(
     data: CommentCreate,
     current_user: CurrentUser,
-    task: WritableTask,
+    task: EditableTask,
     db: DbSession,
     background_tasks: BackgroundTasks,
 ):
@@ -50,7 +50,7 @@ def create_comment(
 @router.put(
     "/{comment_id}",
     response_model=CommentOut,
-    summary="Sửa comment (tác giả / PM / Admin)",
+    summary="Sửa comment (tác giả / OWNER)",
     responses=error_responses(401, 403, 404, 409),
 )
 def update_comment(data: CommentUpdate, comment: ModifiableComment, db: DbSession):
@@ -60,7 +60,7 @@ def update_comment(data: CommentUpdate, comment: ModifiableComment, db: DbSessio
 @router.delete(
     "/{comment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Xóa comment (tác giả / PM / Admin)",
+    summary="Xóa comment (tác giả / OWNER)",
     responses=error_responses(401, 403, 404, 409),
 )
 def delete_comment(comment: ModifiableComment, db: DbSession):

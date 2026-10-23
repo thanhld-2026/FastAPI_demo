@@ -1,9 +1,10 @@
-from sqlalchemy import Select, exists, func, insert, select
+from sqlalchemy import ColumnElement, Select, exists, func, insert, select
 from sqlalchemy import delete as sql_delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.crud import activity as activity_crud
+from app.crud.workspace import visible_to
 from app.models import (
     ActivityAction,
     Project,
@@ -45,7 +46,7 @@ def _reload(db: Session, task_id: int) -> Task:
 def get_for_update(db: Session, task_id: int) -> Task | None:
     """SELECT ... FOR UPDATE: khóa dòng task tới khi commit/rollback.
 
-    Nếu 2 PM cùng assign 1 task cùng lúc, request thứ 2 phải chờ request 1 xong
+    Nếu 2 người cùng assign 1 task cùng lúc, request thứ 2 phải chờ request 1 xong
     -> tránh race condition. (SQLite không hỗ trợ, SQLAlchemy tự bỏ qua mệnh đề này.)
     """
     stmt = (
@@ -73,18 +74,30 @@ def exists_by_id(db: Session, task_id: int) -> bool:
     return bool(db.scalar(select(exists().where(Task.id == task_id))))
 
 
+def _task_visible_to(viewer: User | None) -> ColumnElement[bool]:
+    """Task thuộc project nằm trong workspace mà viewer là thành viên (xem crud.workspace)."""
+    return Task.project_id.in_(
+        select(Project.id).where(visible_to(viewer, Project.workspace_id))
+    )
+
+
 def list_tasks(
     db: Session,
     *,
     pagination: PageParams,
+    viewer: User | None,
     project_id: int | None = None,
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
     assignee_id: int | None = None,
     search: str | None = None,
 ) -> tuple[list[Task], int]:
-    """Lọc + phân trang. Trả về (danh sách task của trang hiện tại, tổng số task khớp filter)."""
-    conditions = []
+    """Lọc + phân trang. Trả về (danh sách task của trang hiện tại, tổng số task khớp filter).
+
+    Chỉ trả task trong workspace `viewer` là thành viên; viewer=None khi tầng trên đã kiểm tra
+    quyền đọc (vd danh sách task của 1 project).
+    """
+    conditions = [_task_visible_to(viewer)]
     if project_id is not None:
         conditions.append(Task.project_id == project_id)
     if status is not None:
@@ -200,16 +213,20 @@ def remove_bookmark(db: Session, *, user_id: int, task_id: int) -> None:
     db.commit()
 
 
-def list_bookmarked(
-    db: Session, user_id: int, pagination: PageParams
-) -> tuple[list[Task], int]:
+def list_bookmarked(db: Session, user: User, pagination: PageParams) -> tuple[list[Task], int]:
+    """Task user đã bookmark. Bị xóa khỏi workspace thì bookmark vẫn giữ nhưng không hiện ra
+    (vào lại workspace thì thấy lại)."""
+    conditions = [task_bookmarks.c.user_id == user.id, _task_visible_to(user)]
     total = db.execute(
-        select(func.count()).select_from(task_bookmarks).where(task_bookmarks.c.user_id == user_id)
+        select(func.count())
+        .select_from(Task)
+        .join(task_bookmarks, task_bookmarks.c.task_id == Task.id)
+        .where(*conditions)
     ).scalar_one()
     stmt = (
         select(Task)
         .join(task_bookmarks, task_bookmarks.c.task_id == Task.id)
-        .where(task_bookmarks.c.user_id == user_id)
+        .where(*conditions)
         .options(*TASK_LOAD_OPTIONS)
         .order_by(task_bookmarks.c.created_at.desc(), Task.id.desc())
         .offset(pagination.offset)

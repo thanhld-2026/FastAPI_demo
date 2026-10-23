@@ -129,13 +129,47 @@ def make_tag(client: TestClient, make_user) -> Callable[[str], dict]:
 
 
 @pytest.fixture
-def make_project(client: TestClient) -> Callable[..., dict]:
-    def _make_project(owner: dict, name: str = "TaskHub") -> dict:
-        resp = client.post("/api/v1/projects", json={"name": name}, headers=owner["headers"])
+def make_workspace(client: TestClient) -> Callable[..., dict]:
+    def _make_workspace(owner: dict, name: str = "Team") -> dict:
+        resp = client.post("/api/v1/workspaces", json={"name": name}, headers=owner["headers"])
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+
+    return _make_workspace
+
+
+@pytest.fixture
+def make_project(client: TestClient, make_workspace) -> Callable[..., dict]:
+    """Tạo project; không truyền workspace thì tạo luôn 1 workspace mới do `owner` làm OWNER."""
+
+    def _make_project(owner: dict, name: str = "TaskHub", workspace: dict | None = None) -> dict:
+        workspace = workspace or make_workspace(owner, name=f"{name} team")
+        resp = client.post(
+            f"/api/v1/workspaces/{workspace['id']}/projects",
+            json={"name": name},
+            headers=owner["headers"],
+        )
         assert resp.status_code == 201, resp.text
         return resp.json()
 
     return _make_project
+
+
+@pytest.fixture
+def add_member(client: TestClient) -> Callable[..., dict]:
+    """OWNER mời `member` vào workspace. `target` là workspace hoặc project (dùng workspace_id)."""
+
+    def _add_member(target: dict, owner: dict, member: dict, role: str = "EDITOR") -> dict:
+        workspace_id = target.get("workspace_id", target["id"])
+        resp = client.post(
+            f"/api/v1/workspaces/{workspace_id}/members",
+            json={"email": member["email"], "role": role},
+            headers=owner["headers"],
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()
+
+    return _add_member
 
 
 @pytest.fixture

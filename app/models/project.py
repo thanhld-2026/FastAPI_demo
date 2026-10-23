@@ -13,6 +13,7 @@ from app.models.enums import ProjectStatus
 if TYPE_CHECKING:
     from app.models.task import Task
     from app.models.user import User
+    from app.models.workspace import Workspace
 
 
 class Project(TimestampMixin, Base):
@@ -30,10 +31,17 @@ class Project(TimestampMixin, Base):
         default=ProjectStatus.ACTIVE,
         server_default=ProjectStatus.ACTIVE.value,
     )
-    # Người tạo project = Project Manager (PM) của project đó
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    # RESTRICT: muốn xóa workspace thì phải xóa hết project bên trong trước (tránh xóa nhầm cả cây)
+    workspace_id: Mapped[int] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), index=True
+    )
+    # Chỉ để biết ai tạo, KHÔNG dùng để phân quyền (quyền đi theo role trong workspace)
+    creator_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
 
-    owner: Mapped[User] = relationship(back_populates="owned_projects")
+    workspace: Mapped[Workspace] = relationship(back_populates="projects")
+    creator: Mapped[User] = relationship(back_populates="created_projects")
     # cascade="all, delete-orphan": xóa project -> xóa luôn các task thuộc project
     tasks: Mapped[list[Task]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Task.id"

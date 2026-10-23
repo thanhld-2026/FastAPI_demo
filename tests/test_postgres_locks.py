@@ -1,4 +1,4 @@
-"""Khóa dòng khi archive / sửa project, chạy trên PostgreSQL thật.
+"""Khóa dòng (archive / sửa project, giao task / đổi role thành viên), chạy trên PostgreSQL thật.
 
 SQLite (dùng cho các test khác) bỏ qua FOR SHARE / FOR UPDATE nên không kiểm tra được.
 Chạy riêng, trên 1 DB chỉ dành cho test (test sẽ XÓA / tạo lại toàn bộ bảng, nên tên DB bắt
@@ -14,6 +14,7 @@ import os
 import threading
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,7 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app import crud
 from app.database import Base, get_db
 from app.main import app
-from app.models import Project, ProjectStatus, User
+from app.models import Project, ProjectStatus, User, Workspace, WorkspaceMember, WorkspaceRole
 from tests.conftest import DEFAULT_PASSWORD
 
 PG_URL = os.environ.get("TEST_POSTGRES_URL")
@@ -59,14 +60,31 @@ def pg_session_factory() -> Iterator[sessionmaker[Session]]:
     engine.dispose()
 
 
+@dataclass
+class Ids:
+    project: int
+    workspace: int
+    editor: int
+
+
 @pytest.fixture
-def project_id(pg_session_factory: sessionmaker[Session]) -> int:
+def ids(pg_session_factory: sessionmaker[Session]) -> Ids:
+    """Workspace (owner + 1 EDITOR) chứa 1 project."""
     with pg_session_factory() as db:
-        owner = User(full_name="pm", email="pm@example.com", hashed_password="x")
-        project = Project(name="TaskHub", owner=owner)
+        owner = User(full_name="owner", email="owner@example.com", hashed_password="x")
+        editor = User(full_name="carol", email="carol@example.com", hashed_password="x")
+        workspace = Workspace(name="Team", owner=owner)
+        workspace.members.append(WorkspaceMember(user=owner, role=WorkspaceRole.OWNER))
+        workspace.members.append(WorkspaceMember(user=editor, role=WorkspaceRole.EDITOR))
+        project = Project(name="TaskHub", workspace=workspace, creator=owner)
         db.add(project)
         db.commit()
-        return project.id
+        return Ids(project=project.id, workspace=workspace.id, editor=editor.id)
+
+
+@pytest.fixture
+def project_id(ids: Ids) -> int:
+    return ids.project
 
 
 def _archive(db: Session, project_id: int) -> None:
@@ -133,6 +151,25 @@ def test_get_for_update_reloads_the_locked_row(pg_session_factory, project_id):
         late.close()
 
 
+def test_member_cannot_be_demoted_while_a_task_is_being_assigned_to_them(pg_session_factory, ids):
+    """Giao task đọc role người nhận bằng FOR SHARE -> đổi role / xóa thành viên (FOR UPDATE
+    dòng membership) phải chờ, không thể giao task cho người vừa bị hạ xuống VIEWER."""
+    assigner = pg_session_factory()
+    owner = pg_session_factory()
+    try:
+        role = crud.workspace.get_role_for_project(assigner, ids.project, ids.editor, lock=True)
+        assert role == WorkspaceRole.EDITOR
+        owner.execute(text("SET lock_timeout = '300ms'"))
+
+        with pytest.raises(OperationalError):
+            crud.workspace.get_member(owner, ids.workspace, ids.editor, lock=True)
+    finally:
+        owner.rollback()
+        assigner.rollback()
+        assigner.close()
+        owner.close()
+
+
 # ---------- Đi qua HTTP: router + dependency thật ----------
 @pytest.fixture
 def pg_client(pg_session_factory: sessionmaker[Session]) -> Iterator[TestClient]:
@@ -149,19 +186,28 @@ def pg_client(pg_session_factory: sessionmaker[Session]) -> Iterator[TestClient]
     app.dependency_overrides.clear()
 
 
-def _pm_with_project(client: TestClient) -> tuple[dict[str, str], int]:
-    """Đăng ký + đăng nhập PM qua API, tạo 1 project. Trả về (headers, project_id)."""
+def _register(client: TestClient, name: str) -> tuple[dict[str, str], int]:
+    """Đăng ký + đăng nhập qua API. Trả về (headers, user_id)."""
+    email = f"{name}@example.com"
     register = client.post(
         "/api/v1/auth/register",
-        json={"full_name": "pm", "email": "pm@example.com", "password": DEFAULT_PASSWORD},
+        json={"full_name": name, "email": email, "password": DEFAULT_PASSWORD},
     )
     # Form OAuth2: field tên `username`, giá trị là email
     login = client.post(
-        "/api/v1/auth/login", data={"username": "pm@example.com", "password": DEFAULT_PASSWORD}
+        "/api/v1/auth/login", data={"username": email, "password": DEFAULT_PASSWORD}
     )
     assert (register.status_code, login.status_code) == (201, 200), login.text
-    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-    project = client.post("/api/v1/projects", json={"name": "TaskHub"}, headers=headers)
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}, register.json()["id"]
+
+
+def _owner_with_project(client: TestClient) -> tuple[dict[str, str], int]:
+    """Tạo user làm OWNER của 1 workspace + 1 project. Trả về (headers, project_id)."""
+    headers, _ = _register(client, "pm")
+    workspace = client.post("/api/v1/workspaces", json={"name": "Team"}, headers=headers).json()
+    project = client.post(
+        f"/api/v1/workspaces/{workspace['id']}/projects", json={"name": "TaskHub"}, headers=headers
+    )
     return headers, project.json()["id"]
 
 
@@ -180,7 +226,7 @@ def _in_thread(call) -> tuple[threading.Thread, dict]:
 
 
 def test_http_task_created_during_archive_waits_then_gets_409(pg_client, pg_session_factory):
-    headers, project_id = _pm_with_project(pg_client)
+    headers, project_id = _owner_with_project(pg_client)
     archiver = pg_session_factory()
     try:
         _archive(archiver, project_id)  # archive chưa commit, đang giữ khóa dòng project
@@ -202,7 +248,7 @@ def test_http_task_created_during_archive_waits_then_gets_409(pg_client, pg_sess
 
 
 def test_http_archive_waits_for_a_running_task_write(pg_client, pg_session_factory):
-    headers, project_id = _pm_with_project(pg_client)
+    headers, project_id = _owner_with_project(pg_client)
     writer = pg_session_factory()
     try:
         # Giả lập 1 request ghi task đang chạy dở: đã giữ FOR SHARE trên dòng project
@@ -221,3 +267,19 @@ def test_http_archive_waits_for_a_running_task_write(pg_client, pg_session_facto
     assert result["response"].status_code == 200
     assert result["response"].json()["status"] == "ARCHIVED"
     assert result["waited"] >= 0.2
+
+
+def test_http_transfer_ownership_respects_the_one_owner_index(pg_client):
+    """Unique index "1 OWNER / workspace" của PostgreSQL kiểm tra ngay từng câu UPDATE: chuyển
+    quyền phải hạ owner cũ trước rồi mới nâng người mới, nếu không sẽ lỗi 500."""
+    owner, _ = _register(pg_client, "alice")
+    _, bob_id = _register(pg_client, "bob")
+    workspace = pg_client.post("/api/v1/workspaces", json={"name": "Team"}, headers=owner).json()
+    url = f"/api/v1/workspaces/{workspace['id']}"
+    pg_client.post(f"{url}/members", json={"email": "bob@example.com"}, headers=owner)
+
+    resp = pg_client.post(f"{url}/transfer-ownership", json={"user_id": bob_id}, headers=owner)
+
+    roles = {m["user"]["full_name"]: m["role"] for m in resp.json()["members"]}
+    assert resp.status_code == 200
+    assert roles == {"alice": "EDITOR", "bob": "OWNER"}

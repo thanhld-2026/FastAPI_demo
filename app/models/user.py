@@ -36,9 +36,9 @@ class User(TimestampMixin, Base):
     )
     is_active: Mapped[bool] = mapped_column(default=True, server_default=true())
 
-    # One-to-Many: user là PM (owner) của nhiều project
-    owned_projects: Mapped[list[Project]] = relationship(
-        back_populates="owner", order_by="Project.id"
+    # One-to-Many: các project do user tạo
+    created_projects: Mapped[list[Project]] = relationship(
+        back_populates="creator", order_by="Project.id"
     )
     # Task có 2 khóa ngoại tới users -> phải chỉ rõ foreign_keys cho từng relationship
     created_tasks: Mapped[list[Task]] = relationship(

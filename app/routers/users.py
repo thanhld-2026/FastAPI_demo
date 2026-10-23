@@ -66,7 +66,7 @@ def change_password(data: PasswordChange, current_user: CurrentUser, db: DbSessi
     responses=error_responses(401, 403),
 )
 def my_bookmarks(current_user: CurrentUser, db: DbSession, pagination: Pagination):
-    items, total = crud.task.list_bookmarked(db, current_user.id, pagination)
+    items, total = crud.task.list_bookmarked(db, current_user, pagination)
     return Page.build(items, total, pagination)
 
 
@@ -107,11 +107,11 @@ def admin_update_user(user_id: int, data: AdminUserUpdate, admin: AdminUser, db:
 @router.get(
     "/{user_id}/profile",
     response_model=UserProfile,
-    summary="Trang cá nhân công khai",
-    responses=error_responses(404),
+    summary="Trang cá nhân (chỉ hiện project / task trong workspace chung với người xem)",
+    responses=error_responses(401, 403, 404),
 )
-def get_profile(user_id: int, db: DbSession):
-    user = crud.user.get_profile(db, user_id)
+def get_profile(user_id: int, current_user: CurrentUser, db: DbSession):
+    user = crud.user.get_profile(db, user_id, viewer=current_user)
     if user is None:
         raise NotFoundException(messages.USER_NOT_FOUND)
     return user

@@ -5,6 +5,15 @@ Quy ước:
 - Router gọi crud, sau đó tự quyết định trả 404 / 403 / 409 ...
 """
 
-from app.crud import activity, comment, project, refresh_token, tag, task, user
+from app.crud import activity, comment, project, refresh_token, tag, task, user, workspace
 
-__all__ = ["activity", "comment", "project", "refresh_token", "tag", "task", "user"]
+__all__ = [
+    "activity",
+    "comment",
+    "project",
+    "refresh_token",
+    "tag",
+    "task",
+    "user",
+    "workspace",
+]

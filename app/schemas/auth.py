@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from app.core.constants import REFRESH_TOKEN_MAX_LENGTH
+from app.core.constants import REFRESH_TOKEN_MAX_LENGTH, REQUIRED_TEXT_MIN_LENGTH
 from app.schemas.common import InputSchema
 
 
@@ -15,4 +15,6 @@ class TokenPair(BaseModel):
 
 
 class RefreshTokenIn(InputSchema):
-    refresh_token: str = Field(min_length=1, max_length=REFRESH_TOKEN_MAX_LENGTH)
+    refresh_token: str = Field(
+        min_length=REQUIRED_TEXT_MIN_LENGTH, max_length=REFRESH_TOKEN_MAX_LENGTH
+    )
