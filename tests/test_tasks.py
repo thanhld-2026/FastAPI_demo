@@ -213,8 +213,11 @@ def test_bookmark_requires_login(client, make_user, make_project, make_task):
     task = make_task(make_project(pm)["id"], pm)
 
     resp = client.post(f"/api/v1/tasks/{task['id']}/bookmark")
+    # 401 đứng trước 404: chưa đăng nhập thì không được biết task có tồn tại hay không
+    missing = [client.request(m, "/api/v1/tasks/999/bookmark") for m in ("POST", "DELETE")]
 
     assert resp.status_code == 401
+    assert [r.status_code for r in missing] == [401, 401]
 
 
 def test_bookmark_and_unbookmark(client, make_user, make_project, make_task, add_member):

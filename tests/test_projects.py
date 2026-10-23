@@ -1,5 +1,11 @@
 """Mục 2, 3 + phụ lục 3-4: project trong workspace, nested response, quyền OWNER, archive."""
 
+import pytest
+
+from app.core.exceptions import ConflictException
+from app.dependencies import _raise_if_not_writable
+from app.models import ProjectStatus
+
 
 def test_create_project_requires_owner_of_workspace(
     client, make_user, make_workspace, add_member
@@ -231,7 +237,45 @@ def test_archived_project_itself_cannot_be_changed_or_deleted(
     assert client.get(f"/api/v1/tasks/{task['id']}", headers=headers).status_code == 200
 
 
-def test_error_order_on_archived_project(client, make_user, make_project, make_task, add_member):
+# Mọi endpoint ghi: (method, path, body, mã cho VIEWER khi project ARCHIVED / ACTIVE).
+# VIEWER là thành viên nhưng không có quyền ghi nào -> lúc ACTIVE luôn 403.
+WRITE_ENDPOINTS = [
+    pytest.param("PUT", "/tasks/{task}", {"status": "DONE"}, 409, 403, id="update-task"),
+    pytest.param("DELETE", "/tasks/{task}", None, 409, 403, id="delete-task"),
+    pytest.param("POST", "/tasks/{task}/assign", {"assignee_id": None}, 409, 403, id="assign"),
+    pytest.param("POST", "/tasks/{task}/comments", {"content": "hi"}, 409, 403, id="add-comment"),
+    pytest.param(
+        "PUT", "/tasks/{task}/comments/{comment}", {"content": "x"}, 409, 403, id="edit-comment"
+    ),
+    pytest.param("DELETE", "/tasks/{task}/comments/{comment}", None, 409, 403, id="delete-comment"),
+    pytest.param("POST", "/projects/{project}/tasks", {"title": "X"}, 409, 403, id="create-task"),
+    pytest.param("PUT", "/projects/{project}", {"name": "X"}, 409, 403, id="update-project"),
+    pytest.param("DELETE", "/projects/{project}", None, 409, 403, id="delete-project"),
+    # archive / unarchive chạy được ở mọi status nên không có 409
+    pytest.param("POST", "/projects/{project}/archive", None, 403, 403, id="archive"),
+    pytest.param("POST", "/projects/{project}/unarchive", None, 403, 403, id="unarchive"),
+    pytest.param("POST", "/projects/{project}/labels", {"name": "x"}, 409, 403, id="create-label"),
+    pytest.param("PATCH", "/labels/{label}", {"name": "y"}, 409, 403, id="update-label"),
+    pytest.param("DELETE", "/labels/{label}", None, 409, 403, id="delete-label"),
+    pytest.param("POST", "/tasks/{task}/labels/{label}", None, 409, 403, id="attach-label"),
+    pytest.param("DELETE", "/tasks/{task}/labels/{label}", None, 409, 403, id="detach-label"),
+]
+
+
+@pytest.mark.parametrize(("method", "path", "body", "on_archived", "on_active"), WRITE_ENDPOINTS)
+def test_error_order_of_write_endpoints(
+    client,
+    make_user,
+    make_project,
+    make_task,
+    make_label,
+    add_member,
+    method,
+    path,
+    body,
+    on_archived,
+    on_active,
+):
     """401 -> 404 (không tồn tại / không phải thành viên) -> 409 (archive) -> 403 (role)."""
     owner = make_user("owner")
     viewer = make_user("viewer")
@@ -239,19 +283,54 @@ def test_error_order_on_archived_project(client, make_user, make_project, make_t
     project = make_project(owner)
     add_member(project, owner, viewer, role="VIEWER")
     task = make_task(project["id"], owner)
-    task_url = f"/api/v1/tasks/{task['id']}"
-    body = {"status": "DONE"}
+    comment = client.post(
+        f"/api/v1/tasks/{task['id']}/comments", json={"content": "hi"}, headers=owner["headers"]
+    ).json()
+    label = make_label(project, owner, "bug")
+    ids = {"project": project["id"], "task": task["id"], "comment": comment["id"]}
+    url = "/api/v1" + path.format(**ids, label=label["id"])
+    missing_url = "/api/v1" + path.format(project=999, task=999, comment=999, label=999)
+    project_url = f"/api/v1/projects/{project['id']}"
 
-    not_archived_viewer = client.put(task_url, json=body, headers=viewer["headers"])
-    client.post(f"/api/v1/projects/{project['id']}/archive", headers=owner["headers"])
-    anonymous = client.put(task_url, json=body)
-    missing = client.put("/api/v1/tasks/999", json=body, headers=owner["headers"])
-    by_stranger = client.put(task_url, json=body, headers=stranger["headers"])
-    by_viewer = client.put(task_url, json=body, headers=viewer["headers"])
+    def call(target: str, user: dict | None = None):
+        headers = user["headers"] if user else {}
+        return client.request(method, target, json=body, headers=headers)
 
-    assert not_archived_viewer.status_code == 403
-    codes = (anonymous, missing, by_stranger, by_viewer)
-    assert [r.status_code for r in codes] == [401, 404, 404, 409]
+    anonymous = call(url)
+    missing = call(missing_url, viewer)
+    by_stranger = call(url, stranger)  # người ngoài workspace: 404 kể cả khi resource có thật
+    client.post(f"{project_url}/archive", headers=owner["headers"])
+    archived = call(url, viewer)
+    client.post(f"{project_url}/unarchive", headers=owner["headers"])
+    active = call(url, viewer)
+
+    codes = [r.status_code for r in (anonymous, missing, by_stranger, archived, active)]
+    assert codes == [401, 404, 404, on_archived, on_active]
+
+
+def test_only_active_projects_accept_writes():
+    """Allow-list: chỉ ACTIVE ghi được. Status thêm sau này (vd "ON_HOLD") mặc định là chỉ đọc,
+    không vô tình thành ghi được như khi chỉ chặn đúng ARCHIVED."""
+    _raise_if_not_writable(ProjectStatus.ACTIVE, "not found")  # không lỗi
+    for status in (ProjectStatus.ARCHIVED, "ON_HOLD"):
+        with pytest.raises(ConflictException):
+            _raise_if_not_writable(status, "not found")  # type: ignore[arg-type]
+
+
+def test_bookmark_still_works_on_archived_project(client, make_user, make_project, make_task):
+    """Ngoại lệ có chủ đích của quy tắc archive (xem dependencies.py): bookmark là dữ liệu cá
+    nhân của người xem, không sửa gì trong project."""
+    owner = make_user("owner")
+    project = make_project(owner)
+    task = make_task(project["id"], owner)
+    url = f"/api/v1/tasks/{task['id']}/bookmark"
+    headers = owner["headers"]
+    client.post(f"/api/v1/projects/{project['id']}/archive", headers=headers)
+
+    bookmarked = client.post(url, headers=headers)
+    unbookmarked = client.delete(url, headers=headers)
+
+    assert (bookmarked.status_code, unbookmarked.status_code) == (200, 200)
 
 
 def test_missing_comment_on_archived_project_is_404(client, make_user, make_project, make_task):

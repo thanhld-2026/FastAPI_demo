@@ -99,10 +99,16 @@ def _require_role(user: User, role: WorkspaceRole | None, minimum: WorkspaceRole
 
 
 def _raise_if_not_writable(status: ProjectStatus | None, not_found_message: str) -> None:
-    """Quy tắc "project đã archive thì project, task, comment bên trong chỉ đọc" chỉ nằm ở đây."""
+    """Quy tắc "project đã archive thì project, task, comment bên trong chỉ đọc" chỉ nằm ở đây.
+
+    Ngoại lệ có chủ đích (không đi qua hàm này, có test): bookmark / bỏ bookmark, vì đó là dữ
+    liệu cá nhân của người xem, không sửa gì trong project. (Tag dùng chung trước đây cũng là
+    ngoại lệ; label thay tag thuộc từng project nên ghi label trong project archive là 409.)
+    """
     if status is None:  # không tồn tại / vừa bị xóa bởi request khác
         raise NotFoundException(not_found_message)
-    if status == ProjectStatus.ARCHIVED:
+    # Chỉ ACTIVE mới ghi được: thêm status mới (vd ON_HOLD) thì mặc định là chỉ đọc
+    if status != ProjectStatus.ACTIVE:
         raise ConflictException(messages.PROJECT_ARCHIVED)
 
 
