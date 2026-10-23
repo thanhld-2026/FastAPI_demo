@@ -29,7 +29,7 @@ from app.security import hash_password
 PASSWORD = "Password123"
 
 USERS = [
-    # username, full_name, role
+    # tên ngắn (email = <tên>@example.com), full_name, role
     ("admin", "System Admin", UserRole.ADMIN),
     ("alice", "Alice Nguyen", UserRole.MEMBER),  # PM của project "TaskHub Backend"
     ("bob", "Bob Tran", UserRole.MEMBER),  # PM của project "TaskHub Mobile"
@@ -43,19 +43,18 @@ TAGS = ["backend", "frontend", "mobile", "bug", "feature", "docs", "urgent"]
 def seed() -> None:
     db = SessionLocal()
     try:
-        if db.scalar(select(User).where(User.username == "admin")):
+        if db.scalar(select(User).where(User.email == "admin@example.com")):
             print("Seed data already exists -> skip.")
             return
 
         users = {
-            username: User(
-                username=username,
-                email=f"{username}@example.com",
+            name: User(
+                email=f"{name}@example.com",
                 full_name=full_name,
                 role=role,
                 hashed_password=hash_password(PASSWORD),
             )
-            for username, full_name, role in USERS
+            for name, full_name, role in USERS
         }
         tags = {name: Tag(name=name) for name in TAGS}
         db.add_all([*users.values(), *tags.values()])
@@ -129,8 +128,8 @@ def seed() -> None:
         db.commit()  # toàn bộ dữ liệu mẫu được lưu trong 1 transaction
 
         print(f"Seed data created. Accounts (password: {PASSWORD}):")
-        for username, _, role in USERS:
-            print(f"  - {username:<6} ({role.value})")
+        for name, _, role in USERS:
+            print(f"  - {name + '@example.com':<18} ({role.value})")
     finally:
         db.close()
 

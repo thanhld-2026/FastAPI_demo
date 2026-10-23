@@ -24,7 +24,7 @@ def test_create_and_get_project(client, make_user):
     detail = client.get(f"/api/v1/projects/{project_id}")
 
     assert created.status_code == 201
-    assert created.json()["owner"]["username"] == "pmuser"  # người tạo = PM
+    assert created.json()["owner"]["full_name"] == "pmuser"  # người tạo = PM
     assert detail.status_code == 200
     assert detail.json()["name"] == "TaskHub"
     assert detail.json()["tasks"] == []
@@ -46,7 +46,7 @@ def test_list_projects_is_paginated(client, make_user, make_project):
     assert resp.status_code == 200
     assert body["total"] == 3
     assert [p["name"] for p in body["items"]] == ["Project 1"]
-    assert body["items"][0]["owner"]["username"] == "pmuser"
+    assert body["items"][0]["owner"]["full_name"] == "pmuser"
 
 
 def test_project_detail_contains_nested_tasks_with_assignee(
@@ -62,9 +62,9 @@ def test_project_detail_contains_nested_tasks_with_assignee(
 
     detail = client.get(f"/api/v1/projects/{project['id']}").json()
 
-    assert detail["owner"]["username"] == "pmuser"
+    assert detail["owner"]["full_name"] == "pmuser"
     assert detail["tasks"][0]["title"] == "Design DB"
-    assert detail["tasks"][0]["assignee"]["username"] == "dev"
+    assert detail["tasks"][0]["assignee"]["full_name"] == "dev"
 
 
 def test_only_project_manager_or_admin_can_update_project(client, make_user, make_project):
@@ -108,14 +108,14 @@ def test_user_profile_contains_projects_and_assigned_tasks(
         f"/api/v1/tasks/{task['id']}/assign", json={"assignee_id": dev["id"]}, headers=pm["headers"]
     )
 
-    pm_profile = client.get("/api/v1/users/pmuser/profile").json()
-    dev_profile = client.get("/api/v1/users/dev/profile").json()
+    pm_profile = client.get(f"/api/v1/users/{pm['id']}/profile").json()
+    dev_profile = client.get(f"/api/v1/users/{dev['id']}/profile").json()
 
     assert [p["name"] for p in pm_profile["owned_projects"]] == ["Mobile App"]
     assert pm_profile["owned_projects"][0]["status"] == "ACTIVE"  # FE biết project đã archive chưa
     assert [t["title"] for t in dev_profile["assigned_tasks"]] == ["Login screen"]
     assert "email" not in dev_profile  # profile công khai không lộ email
-    assert client.get("/api/v1/users/ghost/profile").status_code == 404
+    assert client.get("/api/v1/users/999/profile").status_code == 404
 
 
 def test_archived_project_is_read_only(client, make_user, make_project, make_task):

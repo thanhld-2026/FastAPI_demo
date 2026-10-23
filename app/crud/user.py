@@ -1,4 +1,4 @@
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Task, User, UserRole
@@ -11,17 +11,12 @@ def get_by_id(db: Session, user_id: int) -> User | None:
     return db.get(User, user_id)
 
 
-def get_by_username(db: Session, username: str) -> User | None:
-    return db.scalar(select(User).where(User.username == username))
-
-
 def get_by_email(db: Session, email: str) -> User | None:
     return db.scalar(select(User).where(User.email == email.lower()))
 
 
 def create(db: Session, data: UserCreate, *, role: UserRole = UserRole.MEMBER) -> User:
     user = User(
-        username=data.username,
         email=data.email.lower(),
         full_name=data.full_name,
         hashed_password=hash_password(data.password),  # không bao giờ lưu mật khẩu gốc
@@ -35,8 +30,6 @@ def create(db: Session, data: UserCreate, *, role: UserRole = UserRole.MEMBER) -
 
 def update(db: Session, user: User, data: UserUpdate) -> User:
     values = data.model_dump(exclude_unset=True)
-    if "password" in values:
-        user.hashed_password = hash_password(values.pop("password"))
     if "email" in values:
         values["email"] = values["email"].lower()
     for field, value in values.items():
@@ -44,6 +37,11 @@ def update(db: Session, user: User, data: UserUpdate) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+def set_password(user: User, password: str) -> None:
+    """Đổi hash mật khẩu, KHÔNG commit (service commit cùng việc thu hồi các phiên đăng nhập)."""
+    user.hashed_password = hash_password(password)
 
 
 def admin_update(db: Session, user: User, data: AdminUserUpdate) -> User:
@@ -54,11 +52,21 @@ def admin_update(db: Session, user: User, data: AdminUserUpdate) -> User:
     return user
 
 
-def authenticate(db: Session, identifier: str, password: str) -> User | None:
-    """Đăng nhập bằng username HOẶC email. Trả về None nếu sai thông tin."""
-    user = db.scalar(
-        select(User).where(or_(User.username == identifier, User.email == identifier.lower()))
+def get_for_update(db: Session, user_id: int) -> User | None:
+    """SELECT ... FOR UPDATE + đọc lại dòng user: refresh token, đổi mật khẩu, khóa tài khoản của
+    cùng 1 user chạy tuần tự (xem services/auth.py)."""
+    stmt = (
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
+    return db.scalar(stmt)
+
+
+def authenticate(db: Session, email: str, password: str) -> User | None:
+    """Đăng nhập bằng email. Trả về None nếu sai thông tin."""
+    user = get_by_email(db, email)
     if user is None:
         verify_password(password, DUMMY_HASH)  # giữ thời gian phản hồi đồng đều
         return None
@@ -74,11 +82,11 @@ def list_users(db: Session, pagination: PageParams) -> tuple[list[User], int]:
     return list(users), total
 
 
-def get_profile(db: Session, username: str) -> User | None:
+def get_profile(db: Session, user_id: int) -> User | None:
     """User kèm project đang quản lý + task được giao, load sẵn trong 3 query cố định."""
     stmt = (
         select(User)
-        .where(User.username == username)
+        .where(User.id == user_id)
         .options(
             selectinload(User.owned_projects),
             selectinload(User.assigned_tasks).joinedload(Task.assignee),

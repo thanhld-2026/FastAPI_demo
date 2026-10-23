@@ -8,7 +8,7 @@ RESTful API quản lý **project** và **task** (giống Jira/Trello thu nhỏ),
 | ORM / Migration | SQLAlchemy 2.1 (sync) + Alembic |
 | Database | PostgreSQL 17 (driver psycopg 3) |
 | Validate dữ liệu | Pydantic v2, pydantic-settings, python-dotenv |
-| Xác thực | OAuth2 Password Flow + JWT (PyJWT), băm mật khẩu bằng bcrypt |
+| Xác thực | OAuth2 Password Flow, JWT access token + refresh token (rotation, thu hồi được), bcrypt |
 | Cache | Redis |
 | Email (dev) | Mailpit (SMTP giả lập, có giao diện web) |
 | Test | pytest + TestClient + SQLite in-memory + fakeredis |
@@ -52,19 +52,37 @@ uvicorn app.main:app --reload           # http://localhost:8000/docs
 
 Tất cả dùng chung mật khẩu **`Password123`**.
 
-| Username | Vai trò |
+| Email | Vai trò |
 |---|---|
-| `admin` | Admin hệ thống, làm được mọi thứ |
-| `alice` | PM của project **TaskHub Backend** (task 1–6) |
-| `bob` | PM của project **TaskHub Mobile** (task 7–9) |
-| `carol`, `dave` | Member, được assign một số task |
+| `admin@example.com` | Admin hệ thống, làm được mọi thứ |
+| `alice@example.com` | PM của project **TaskHub Backend** (task 1–6) |
+| `bob@example.com` | PM của project **TaskHub Mobile** (task 7–9) |
+| `carol@example.com`, `dave@example.com` | Member, được assign một số task |
 
-Đăng nhập trên Swagger: bấm nút **Authorize**, nhập username/password (hoặc email/password).
+Đăng nhập bằng **email** (theo đặc tả, user không có username). Trên Swagger bấm **Authorize**,
+ô `username` của form OAuth2 nhập email (tên field do chuẩn OAuth2 quy định).
+
+Phiên đăng nhập gồm 2 token:
+
+- **Access token** (JWT, mặc định 15 phút): gửi trong header `Authorization: Bearer ...`.
+  Không lưu DB nên không thu hồi được, vì vậy để sống ngắn.
+- **Refresh token** (chuỗi ngẫu nhiên, mặc định 7 ngày): DB chỉ lưu SHA-256 của nó.
+  `POST /api/v1/auth/refresh` đổi lấy cặp token mới, token cũ hết dùng được (rotation).
+  Các token nối tiếp nhau tạo thành 1 chuỗi = 1 phiên đăng nhập trên 1 thiết bị.
+  Token cũ bị gửi lại sau thời gian ân hạn (`REFRESH_TOKEN_REUSE_GRACE_SECONDS`, mặc định 10 giây)
+  thì coi như bị lộ: **cả chuỗi của phiên đó** bị thu hồi, phiên khác không ảnh hưởng.
+  Gửi lại trong thời gian ân hạn (retry, 2 tab cùng refresh) chỉ nhận 401.
+- Logout (kể cả bằng token cũ đã bị đổi) kết thúc cả phiên đó. Đổi mật khẩu thu hồi mọi phiên
+  và trả cặp token mới cho thiết bị hiện tại. Admin khóa tài khoản cũng thu hồi mọi phiên.
+- Refresh / logout / đổi mật khẩu / khóa tài khoản của cùng 1 user chạy tuần tự (khóa dòng user).
+- Access token có claim `type: "access"`: JWT khác ký cùng `SECRET_KEY` không dùng thay được.
+- Chưa có rate limit cho login / refresh / đổi mật khẩu (chống dò mật khẩu): dự định làm sau bằng
+  Redis (đếm số lần theo IP + email trong 1 khoảng thời gian, quá ngưỡng trả `429`).
 
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 94 test (+5 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 110 test (+5 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 # Test khóa dòng (FOR SHARE / FOR UPDATE) cần PostgreSQL thật, DB rỗng dành riêng cho test:
 # (test xóa / tạo lại toàn bộ bảng nên tên DB bắt buộc kết thúc bằng _test, nếu không test dừng ngay)
@@ -81,7 +99,7 @@ mypy            # kiểm tra kiểu cho app/ và scripts/
 │   ├── main.py              # Tạo app: CORS, middleware log, exception handler, gắn router
 │   ├── config.py            # Đọc cấu hình từ .env (pydantic-settings)
 │   ├── database.py          # engine, SessionLocal, Base, dependency get_db
-│   ├── security.py          # bcrypt hash/verify, tạo/giải mã JWT
+│   ├── security.py          # bcrypt hash/verify, tạo/giải mã JWT, tạo/hash refresh token
 │   ├── dependencies.py      # get_current_user, phân quyền (verify_*), load resource, phân trang
 │   ├── permissions.py       # Quy tắc phân quyền nghiệp vụ (hàm thuần True/False)
 │   ├── core/                # Exception + handler, message lỗi, hằng số, error responses
@@ -141,11 +159,14 @@ Quy ước:
 
 | Method | Endpoint | Quyền | Mục đề |
 |---|---|---|---|
-| POST | `/api/v1/users/register` | Công khai | 4 |
-| POST | `/api/v1/users/login` | Công khai | 4 |
-| GET / PUT | `/api/v1/users/me` | Đã đăng nhập | 4 |
+| POST | `/api/v1/auth/register` | Công khai | 4 |
+| POST | `/api/v1/auth/login` | Công khai (trả access + refresh token) | 4, PL 1 |
+| POST | `/api/v1/auth/refresh` | Có refresh token hợp lệ | PL 1 |
+| POST | `/api/v1/auth/logout` | Có refresh token (idempotent, 204) | PL 1 |
+| GET / PATCH | `/api/v1/users/me` | Đã đăng nhập | 4, PL 2 |
+| PUT | `/api/v1/users/me/password` | Đã đăng nhập, cần mật khẩu hiện tại (trả cặp token mới) | PL 2 |
 | GET | `/api/v1/users/me/bookmarks` | Đã đăng nhập (phân trang) | 5 |
-| GET | `/api/v1/users/{username}/profile` | Công khai | 3 |
+| GET | `/api/v1/users/{user_id}/profile` | Công khai | 3 |
 | GET | `/api/v1/users` | Admin | 5 |
 | PATCH | `/api/v1/users/{user_id}` | Admin (đổi role, khóa tài khoản) | 5 |
 | GET | `/api/v1/projects?status=` | Công khai (lọc theo status + phân trang) | 2, PL 4 |
@@ -174,5 +195,5 @@ Lỗi luôn trả về dạng `{"detail": "..."}`, mã lỗi của từng endpoi
 - `403`: đã đăng nhập nhưng không đủ quyền.
 - `404`: resource trên URL không tồn tại.
 - `400`: body tham chiếu tới dữ liệu không tồn tại (tag_ids, assignee_id).
-- `409`: trùng dữ liệu (username, email, tag) hoặc project đã archive.
+- `409`: trùng dữ liệu (email, tag) hoặc project đã archive.
 - `422`: dữ liệu sai định dạng.

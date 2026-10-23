@@ -26,7 +26,12 @@ class Settings(BaseSettings):
     # Bắt buộc phải khai báo, không có giá trị mặc định -> tránh vô tình dùng key yếu
     SECRET_KEY: str = Field(min_length=32)
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    # Access token sống ngắn (không thu hồi được), refresh token sống dài (lưu DB, thu hồi được)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=15, ge=1)
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, ge=1)
+    # Token vừa được đổi (rotation) mà bị gửi lại trong khoảng này -> coi là retry / 2 tab cùng
+    # refresh (trả 401), quá khoảng này -> coi là token bị lộ, thu hồi cả chuỗi
+    REFRESH_TOKEN_REUSE_GRACE_SECONDS: int = Field(default=10, ge=0)
     BCRYPT_ROUNDS: int = Field(default=12, ge=4, le=16)
 
     # --- CORS ---

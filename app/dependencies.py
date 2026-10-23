@@ -37,7 +37,7 @@ from app.schemas.common import PageParams
 from app.security import decode_access_token
 
 # tokenUrl: endpoint đăng nhập -> Swagger UI dùng để hiện nút "Authorize"
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{API_V1_PREFIX}/users/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{API_V1_PREFIX}/auth/login")
 
 DbSession = Annotated[Session, Depends(get_db)]
 

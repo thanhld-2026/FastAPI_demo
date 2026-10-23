@@ -17,14 +17,14 @@ def test_register_login_and_create_task_flow(client):
     """Đi qua API giống hệt 1 client thật: không chạm trực tiếp vào DB."""
     # 1. Đăng ký
     register = client.post(
-        "/api/v1/users/register",
-        json={"username": "alice", "email": "alice@example.com", "password": DEFAULT_PASSWORD},
+        "/api/v1/auth/register",
+        json={"full_name": "alice", "email": "alice@example.com", "password": DEFAULT_PASSWORD},
     )
     assert register.status_code == 201
 
     # 2. Đăng nhập -> nhận access token
     login = client.post(
-        "/api/v1/users/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
+        "/api/v1/auth/login", data={"username": "alice@example.com", "password": DEFAULT_PASSWORD}
     )
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
@@ -47,7 +47,7 @@ def test_register_login_and_create_task_flow(client):
     assert task["status"] == "TODO"  # giá trị mặc định
     assert task["priority"] == "HIGH"
     assert task["due_date"] == due_date
-    assert task["creator"]["username"] == "alice"
+    assert task["creator"]["full_name"] == "alice"
     assert task["assignee"] is None
 
     # 5. Đọc lại: task xuất hiện trong danh sách task của project
@@ -366,7 +366,7 @@ def test_lazy_loading_causes_n_plus_one(
 
     tasks = db.scalars(select(Task)).all()  # 1 query
     for task in tasks:
-        _ = task.assignee.username  # lazy load: +1 query / task (lần đầu gặp user đó)
+        _ = task.assignee.full_name  # lazy load: +1 query / task (lần đầu gặp user đó)
         _ = [tag.name for tag in task.tags]  # lazy load: +1 query / task
 
     assert len(sql_log) > len(tasks)  # 1 + N... -> chính là N+1

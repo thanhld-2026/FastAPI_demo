@@ -28,12 +28,12 @@ def test_pm_can_assign_task_and_activity_is_logged(client, make_user, setup_task
     activities = client.get(f"/api/v1/tasks/{task['id']}/activities").json()["items"]
 
     assert resp.status_code == 200
-    assert resp.json()["assignee"]["username"] == "dev"
+    assert resp.json()["assignee"]["full_name"] == "dev"
     assert [(a["action"], a["detail"]) for a in activities] == [
         ("created", None),
         ("assigned", "assigned to dev"),
     ]
-    assert activities[1]["actor"]["username"] == "pmuser"
+    assert activities[1]["actor"]["full_name"] == "pmuser"
 
 
 def test_non_manager_cannot_assign_task(client, make_user, setup_task):
@@ -61,7 +61,7 @@ def test_reassigning_same_user_does_not_log_activity(client, make_user, setup_ta
     activities = client.get(f"/api/v1/tasks/{task['id']}/activities").json()["items"]
 
     assert again.status_code == 200
-    assert again.json()["assignee"]["username"] == "dev"
+    assert again.json()["assignee"]["full_name"] == "dev"
     # Không đổi người nhận -> không ghi thêm activity (giống update khi không có gì thay đổi)
     assert [a["action"] for a in activities] == ["created", "assigned"]
 
@@ -73,7 +73,7 @@ def test_admin_can_assign_and_unassign(client, make_user, setup_task):
     assigned = client.post(url, json={"assignee_id": creator["id"]}, headers=admin["headers"])
     unassigned = client.post(url, json={"assignee_id": None}, headers=admin["headers"])
 
-    assert assigned.json()["assignee"]["username"] == "creator"
+    assert assigned.json()["assignee"]["full_name"] == "creator"
     assert unassigned.status_code == 200
     assert unassigned.json()["assignee"] is None
 
@@ -162,7 +162,7 @@ def test_logged_in_user_can_comment(client, make_user, setup_task):
     assert anonymous.status_code == 401
     assert created.status_code == 201
     assert created.json()["content"] == "LGTM!"  # khoảng trắng thừa được cắt
-    assert created.json()["author"]["username"] == "reviewer"
+    assert created.json()["author"]["full_name"] == "reviewer"
     assert [c["content"] for c in listed] == ["LGTM!"]
     activities = client.get(f"/api/v1/tasks/{task['id']}/activities").json()["items"]
     assert activities[-1]["action"] == "commented"

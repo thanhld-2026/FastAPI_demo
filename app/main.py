@@ -21,7 +21,7 @@ from app.core.constants import API_V1_PREFIX, REQUEST_ID_PATTERN
 from app.core.exceptions import AppException, app_exception_handler
 from app.dependencies import DbSession
 from app.logging_config import setup_logging
-from app.routers import comments, projects, tags, tasks, users
+from app.routers import auth, comments, projects, tags, tasks, users
 
 setup_logging(settings.LOG_LEVEL, settings.LOG_FILE)
 logger = logging.getLogger(__name__)
@@ -109,8 +109,9 @@ app.add_exception_handler(AppException, app_exception_handler)
 
 # ---------- Routers ----------
 # Mọi API nghiệp vụ nằm dưới /api/v1 (router chỉ khai báo phần đường dẫn phía sau)
-for router in (users.router, projects.router, tasks.router, comments.router, tags.router):
-    app.include_router(router, prefix=API_V1_PREFIX)
+routers = (auth, users, projects, tasks, comments, tags)
+for module in routers:
+    app.include_router(module.router, prefix=API_V1_PREFIX)
 
 
 @app.get("/", include_in_schema=False)

@@ -84,13 +84,16 @@ def client() -> Iterator[TestClient]:
 def make_user(client: TestClient, db: Session) -> Callable[..., dict]:
     """Factory: đăng ký + đăng nhập 1 user qua API.
 
-    Trả về dict: {"id", "username", "email", "headers"} với headers chứa Bearer token.
+    `name` dùng làm full_name, email là <name>@example.com.
+    Trả về dict: {"id", "full_name", "email", "headers", "refresh_token"},
+    headers chứa Bearer access token.
     """
 
-    def _make_user(username: str, *, admin: bool = False, password: str = DEFAULT_PASSWORD) -> dict:
+    def _make_user(name: str, *, admin: bool = False, password: str = DEFAULT_PASSWORD) -> dict:
+        email = f"{name}@example.com"
         resp = client.post(
-            "/api/v1/users/register",
-            json={"username": username, "email": f"{username}@example.com", "password": password},
+            "/api/v1/auth/register",
+            json={"full_name": name, "email": email, "password": password},
         )
         assert resp.status_code == 201, resp.text
         user = resp.json()
@@ -99,10 +102,14 @@ def make_user(client: TestClient, db: Session) -> Callable[..., dict]:
             db.execute(update(User).where(User.id == user["id"]).values(role=UserRole.ADMIN))
             db.commit()
 
-        resp = client.post("/api/v1/users/login", data={"username": username, "password": password})
+        resp = client.post("/api/v1/auth/login", data={"username": email, "password": password})
         assert resp.status_code == 200, resp.text
-        token = resp.json()["access_token"]
-        return {**user, "headers": {"Authorization": f"Bearer {token}"}}
+        tokens = resp.json()
+        return {
+            **user,
+            "headers": {"Authorization": f"Bearer {tokens['access_token']}"},
+            "refresh_token": tokens["refresh_token"],
+        }
 
     return _make_user
 

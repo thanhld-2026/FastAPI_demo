@@ -5,15 +5,16 @@ INTERNAL_SERVER_ERROR = "Internal server error"
 
 # --- Auth ---
 INVALID_CREDENTIALS = "Could not validate credentials"
-INCORRECT_LOGIN = "Incorrect username or password"
+INCORRECT_LOGIN = "Incorrect email or password"
 INACTIVE_USER = "Inactive user"
 ADMIN_REQUIRED = "Admin privileges required"
+INVALID_REFRESH_TOKEN = "Invalid, expired or revoked refresh token"
+WRONG_CURRENT_PASSWORD = "Current password is incorrect"
+NEW_PASSWORD_SAME_AS_CURRENT = "New password must be different from the current password"
 
 # --- User ---
 USER_NOT_FOUND = "User not found"
-USERNAME_TAKEN = "Username already registered"
 EMAIL_TAKEN = "Email already registered"
-USERNAME_OR_EMAIL_TAKEN = "Username or email already registered"
 ADMIN_CANNOT_DEMOTE_SELF = "Admins cannot demote or deactivate themselves"
 
 # --- Project ---

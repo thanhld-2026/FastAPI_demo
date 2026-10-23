@@ -62,7 +62,7 @@ def pg_session_factory() -> Iterator[sessionmaker[Session]]:
 @pytest.fixture
 def project_id(pg_session_factory: sessionmaker[Session]) -> int:
     with pg_session_factory() as db:
-        owner = User(username="pm", email="pm@example.com", hashed_password="x")
+        owner = User(full_name="pm", email="pm@example.com", hashed_password="x")
         project = Project(name="TaskHub", owner=owner)
         db.add(project)
         db.commit()
@@ -151,9 +151,14 @@ def pg_client(pg_session_factory: sessionmaker[Session]) -> Iterator[TestClient]
 
 def _pm_with_project(client: TestClient) -> tuple[dict[str, str], int]:
     """Đăng ký + đăng nhập PM qua API, tạo 1 project. Trả về (headers, project_id)."""
-    account = {"username": "pmuser", "password": DEFAULT_PASSWORD}
-    register = client.post("/api/v1/users/register", json={**account, "email": "pm@example.com"})
-    login = client.post("/api/v1/users/login", data=account)
+    register = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "pm", "email": "pm@example.com", "password": DEFAULT_PASSWORD},
+    )
+    # Form OAuth2: field tên `username`, giá trị là email
+    login = client.post(
+        "/api/v1/auth/login", data={"username": "pm@example.com", "password": DEFAULT_PASSWORD}
+    )
     assert (register.status_code, login.status_code) == (201, 200), login.text
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
     project = client.post("/api/v1/projects", json={"name": "TaskHub"}, headers=headers)

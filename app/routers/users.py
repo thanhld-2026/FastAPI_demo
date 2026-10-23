@@ -1,66 +1,20 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter, Depends
 from sqlalchemy.exc import IntegrityError
 
 from app import crud
 from app.core import messages
-from app.core.exceptions import (
-    BadRequestException,
-    ConflictException,
-    ForbiddenException,
-    NotFoundException,
-    UnauthorizedException,
-)
+from app.core.exceptions import BadRequestException, ConflictException, NotFoundException
 from app.core.responses import error_responses
 from app.dependencies import AdminUser, CurrentUser, DbSession, Pagination, verify_admin_role
 from app.models import UserRole
+from app.schemas.auth import TokenPair
 from app.schemas.common import Page
 from app.schemas.profile import UserProfile
 from app.schemas.task import TaskOut
-from app.schemas.user import AdminUserUpdate, Token, UserCreate, UserOut, UserUpdate
-from app.security import create_access_token
+from app.schemas.user import AdminUserUpdate, PasswordChange, UserOut, UserUpdate
+from app.services import auth as auth_service
 
 router = APIRouter(prefix="/users", tags=["Users"])
-
-
-@router.post(
-    "/register",
-    response_model=UserOut,
-    status_code=status.HTTP_201_CREATED,
-    summary="Đăng ký tài khoản",
-    responses=error_responses(409),
-)
-def register(data: UserCreate, db: DbSession):
-    if crud.user.get_by_username(db, data.username):
-        raise ConflictException(messages.USERNAME_TAKEN)
-    if crud.user.get_by_email(db, data.email):
-        raise ConflictException(messages.EMAIL_TAKEN)
-    try:
-        return crud.user.create(db, data)
-    except IntegrityError:
-        # 2 request đăng ký cùng username gần như đồng thời: cả 2 đều qua bước kiểm tra
-        # ở trên, nhưng UNIQUE constraint trong DB vẫn chặn được request thứ 2.
-        db.rollback()
-        raise ConflictException(messages.USERNAME_OR_EMAIL_TAKEN) from None
-
-
-@router.post(
-    "/login",
-    response_model=Token,
-    summary="Đăng nhập (trả về access_token)",
-    responses=error_responses(401, 403),
-)
-def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbSession):
-    """Chuẩn OAuth2 Password Flow: gửi **form data** `username` + `password`
-    (field `username` chấp nhận cả username hoặc email)."""
-    user = crud.user.authenticate(db, form.username, form.password)
-    if user is None:
-        raise UnauthorizedException(messages.INCORRECT_LOGIN)
-    if not user.is_active:
-        raise ForbiddenException(messages.INACTIVE_USER)
-    return Token(access_token=create_access_token(user.id))
 
 
 @router.get(
@@ -73,10 +27,10 @@ def read_me(current_user: CurrentUser):
     return current_user
 
 
-@router.put(
+@router.patch(
     "/me",
     response_model=UserOut,
-    summary="Cập nhật thông tin cá nhân",
+    summary="Cập nhật thông tin cá nhân (chỉ field được gửi lên)",
     responses=error_responses(401, 403, 409),
 )
 def update_me(data: UserUpdate, current_user: CurrentUser, db: DbSession):
@@ -93,6 +47,16 @@ def update_me(data: UserUpdate, current_user: CurrentUser, db: DbSession):
         # 2 request đổi sang cùng 1 email gần như đồng thời -> UNIQUE trong DB chặn request sau
         db.rollback()
         raise ConflictException(messages.EMAIL_TAKEN) from None
+
+
+@router.put(
+    "/me/password",
+    response_model=TokenPair,
+    summary="Đổi mật khẩu: thiết bị khác bị đăng xuất, thiết bị hiện tại nhận cặp token mới",
+    responses=error_responses(400, 401, 403),
+)
+def change_password(data: PasswordChange, current_user: CurrentUser, db: DbSession):
+    return auth_service.change_password(db, current_user, data)
 
 
 @router.get(
@@ -133,17 +97,21 @@ def admin_update_user(user_id: int, data: AdminUserUpdate, admin: AdminUser, db:
     demote_or_deactivate = data.role not in (None, UserRole.ADMIN) or data.is_active is False
     if user.id == admin.id and demote_or_deactivate:
         raise BadRequestException(messages.ADMIN_CANNOT_DEMOTE_SELF)
+    if data.is_active is False:
+        # Khóa tài khoản = kết thúc mọi phiên: nếu không, mở khóa lại thì refresh token cũ
+        # (có thể đang trong tay kẻ gian, lý do bị khóa) dùng được tiếp. Commit cùng admin_update.
+        auth_service.revoke_all_sessions(db, user.id)
     return crud.user.admin_update(db, user, data)
 
 
 @router.get(
-    "/{username}/profile",
+    "/{user_id}/profile",
     response_model=UserProfile,
     summary="Trang cá nhân công khai",
     responses=error_responses(404),
 )
-def get_profile(username: str, db: DbSession):
-    user = crud.user.get_profile(db, username)
+def get_profile(user_id: int, db: DbSession):
+    user = crud.user.get_profile(db, user_id)
     if user is None:
         raise NotFoundException(messages.USER_NOT_FOUND)
     return user

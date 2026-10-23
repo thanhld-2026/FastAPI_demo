@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import ACTIVITY_DETAIL_MAX_LENGTH
 from app.database import Base
-from app.models.base import enum_column
+from app.models.base import UTCDateTime, enum_column
 from app.models.enums import ActivityAction
 
 if TYPE_CHECKING:
@@ -32,7 +32,7 @@ class TaskActivity(Base):
     actor_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     action: Mapped[ActivityAction] = mapped_column(enum_column(ActivityAction))
     detail: Mapped[str | None] = mapped_column(String(ACTIVITY_DETAIL_MAX_LENGTH))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), server_default=func.now())
 
     task: Mapped[Task] = relationship(back_populates="activities")
     actor: Mapped[User] = relationship()

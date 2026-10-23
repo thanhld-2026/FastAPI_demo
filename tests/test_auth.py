@@ -1,10 +1,12 @@
 """Mục 4 & 5: Đăng ký / đăng nhập JWT, bảo vệ endpoint, phân quyền admin."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
+import jwt
 from sqlalchemy import update
 
 from app import crud
+from app.config import settings
 from app.models import User
 from app.security import create_access_token
 from tests.conftest import DEFAULT_PASSWORD
@@ -12,39 +14,39 @@ from tests.conftest import DEFAULT_PASSWORD
 
 def test_register_returns_user_without_password(client):
     resp = client.post(
-        "/api/v1/users/register",
-        json={"username": "alice", "email": "Alice@Example.com", "password": DEFAULT_PASSWORD},
+        "/api/v1/auth/register",
+        json={"full_name": "alice", "email": "Alice@Example.com", "password": DEFAULT_PASSWORD},
     )
 
     assert resp.status_code == 201
     body = resp.json()
-    assert body["username"] == "alice"
+    assert body["full_name"] == "alice"
     assert body["email"] == "alice@example.com"  # email được chuẩn hóa chữ thường
     assert body["role"] == "member"
     assert "password" not in body and "hashed_password" not in body
 
 
-def test_register_duplicate_username_or_email_returns_409(client, make_user):
+def test_register_duplicate_email_returns_409(client, make_user):
     make_user("alice")
 
-    same_username = client.post(
-        "/api/v1/users/register",
-        json={"username": "alice", "email": "other@example.com", "password": DEFAULT_PASSWORD},
+    same_name = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "alice", "email": "other@example.com", "password": DEFAULT_PASSWORD},
     )
     same_email = client.post(
-        "/api/v1/users/register",
-        json={"username": "alice2", "email": "alice@example.com", "password": DEFAULT_PASSWORD},
+        "/api/v1/auth/register",
+        json={"full_name": "Alice 2", "email": "ALICE@example.com", "password": DEFAULT_PASSWORD},
     )
 
-    assert same_username.status_code == 409
-    assert same_email.status_code == 409
+    assert same_name.status_code == 201  # tên hiển thị được phép trùng
+    assert same_email.status_code == 409  # email so sánh không phân biệt hoa thường
 
 
 def test_register_rejects_mass_assignment_of_role(client):
     resp = client.post(
-        "/api/v1/users/register",
+        "/api/v1/auth/register",
         json={
-            "username": "hacker",
+            "full_name": "hacker",
             "email": "hacker@example.com",
             "password": DEFAULT_PASSWORD,
             "role": "admin",
@@ -55,40 +57,43 @@ def test_register_rejects_mass_assignment_of_role(client):
 
 def test_register_validates_input(client):
     resp = client.post(
-        "/api/v1/users/register",
-        json={"username": "a b", "email": "not-an-email", "password": "short"},
+        "/api/v1/auth/register",
+        json={"full_name": "", "email": "not-an-email", "password": "short"},
     )
 
     assert resp.status_code == 422
     invalid_fields = {err["loc"][-1] for err in resp.json()["detail"]}
-    assert invalid_fields == {"username", "email", "password"}
+    assert invalid_fields == {"full_name", "email", "password"}
 
 
-def test_login_with_username_or_email(client, make_user):
+def test_login_with_email(client, make_user):
     make_user("alice")
 
-    by_username = client.post(
-        "/api/v1/users/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
-    )
+    # Form OAuth2 bắt buộc tên field `username`, giá trị là email (không phân biệt hoa thường)
     by_email = client.post(
-        "/api/v1/users/login", data={"username": "alice@example.com", "password": DEFAULT_PASSWORD}
+        "/api/v1/auth/login", data={"username": "Alice@Example.com", "password": DEFAULT_PASSWORD}
+    )
+    by_name = client.post(
+        "/api/v1/auth/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
     )
 
-    assert by_username.status_code == 200
-    assert by_username.json()["token_type"] == "bearer"
     assert by_email.status_code == 200
+    assert by_email.json()["token_type"] == "bearer"
+    assert by_name.status_code == 401  # không còn đăng nhập bằng username
 
 
 def test_login_with_wrong_password_returns_401(client, make_user):
     make_user("alice")
 
-    resp = client.post("/api/v1/users/login", data={"username": "alice", "password": "WrongPass1"})
+    resp = client.post(
+        "/api/v1/auth/login", data={"username": "alice@example.com", "password": "WrongPass1"}
+    )
     unknown = client.post(
-        "/api/v1/users/login", data={"username": "nobody", "password": "WrongPass1"}
+        "/api/v1/auth/login", data={"username": "nobody@example.com", "password": "WrongPass1"}
     )
 
     assert resp.status_code == 401
-    assert unknown.status_code == 401  # không tiết lộ username có tồn tại hay không
+    assert unknown.status_code == 401  # không tiết lộ email có tồn tại hay không
 
 
 def test_me_requires_valid_token(client, make_user):
@@ -105,7 +110,24 @@ def test_me_requires_valid_token(client, make_user):
     assert bad_token.status_code == 401
     assert expired_token.status_code == 401
     assert ok.status_code == 200
-    assert ok.json()["username"] == "alice"
+    assert ok.json()["full_name"] == "alice"
+
+
+def test_only_access_tokens_are_accepted(client, make_user):
+    """JWT khác ký cùng SECRET_KEY (vd token đặt lại mật khẩu sau này) không dùng thay access
+    token được: thiếu claim `type` hoặc `type` khác "access" -> 401."""
+    alice = make_user("alice")
+    now = datetime.now(UTC)
+    base = {"sub": str(alice["id"]), "iat": now, "exp": now + timedelta(minutes=5)}
+
+    def call(payload: dict) -> int:
+        token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+        headers = {"Authorization": f"Bearer {token}"}
+        return client.get("/api/v1/users/me", headers=headers).status_code
+
+    assert call({**base, "type": "access"}) == 200
+    assert call({**base, "type": "reset_password"}) == 401
+    assert call(base) == 401  # token cũ chưa có `type`
 
 
 def test_me_works_with_legacy_email_stored_in_db(client, db, make_user):
@@ -124,33 +146,33 @@ def test_me_works_with_legacy_email_stored_in_db(client, db, make_user):
     assert resp.json()["email"] == "alice@taskhub.local"
 
 
-def test_update_me_including_password(client, make_user):
+def test_patch_me_updates_only_sent_fields(client, make_user):
+    alice = make_user("alice")
+    url = "/api/v1/users/me"
+
+    first = client.patch(url, json={"full_name": "Alice Nguyen"}, headers=alice["headers"])
+    second = client.patch(url, json={"bio": "Backend dev"}, headers=alice["headers"])
+
+    assert first.status_code == 200
+    assert second.json()["full_name"] == "Alice Nguyen"  # field không gửi giữ nguyên
+    assert second.json()["bio"] == "Backend dev"
+
+
+def test_patch_me_cannot_change_password(client, make_user):
     alice = make_user("alice")
 
-    resp = client.put(
-        "/api/v1/users/me",
-        json={"full_name": "Alice Nguyen", "bio": "Backend dev", "password": "NewPassword456"},
-        headers=alice["headers"],
+    resp = client.patch(
+        "/api/v1/users/me", json={"password": "NewPassword456"}, headers=alice["headers"]
     )
 
-    assert resp.status_code == 200
-    assert resp.json()["full_name"] == "Alice Nguyen"
-    assert resp.json()["bio"] == "Backend dev"
-    old_login = client.post(
-        "/api/v1/users/login", data={"username": "alice", "password": DEFAULT_PASSWORD}
-    )
-    new_login = client.post(
-        "/api/v1/users/login", data={"username": "alice", "password": "NewPassword456"}
-    )
-    assert old_login.status_code == 401
-    assert new_login.status_code == 200
+    assert resp.status_code == 422  # phải dùng PUT /users/me/password
 
 
 def test_update_me_with_taken_email_returns_409(client, make_user):
     make_user("alice")
     bob = make_user("bob")
 
-    resp = client.put(
+    resp = client.patch(
         "/api/v1/users/me", json={"email": "alice@example.com"}, headers=bob["headers"]
     )
 
@@ -179,7 +201,7 @@ def test_deactivated_user_is_blocked(client, make_user):
     # Token cũ vẫn còn hạn nhưng get_current_active_user chặn lại
     assert client.get("/api/v1/users/me", headers=bob["headers"]).status_code == 403
     login = client.post(
-        "/api/v1/users/login", data={"username": "bob", "password": DEFAULT_PASSWORD}
+        "/api/v1/auth/login", data={"username": "bob@example.com", "password": DEFAULT_PASSWORD}
     )
     assert login.status_code == 403
 
@@ -202,7 +224,7 @@ def test_update_me_email_race_condition_returns_409(client, make_user, monkeypat
     # Giả lập request còn lại chưa kịp commit lúc bob check email
     monkeypatch.setattr(crud.user, "get_by_email", lambda db, email: None)
 
-    resp = client.put(
+    resp = client.patch(
         "/api/v1/users/me", json={"email": "alice@example.com"}, headers=bob["headers"]
     )
 
