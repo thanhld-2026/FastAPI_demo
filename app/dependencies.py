@@ -110,10 +110,16 @@ TagDep = Annotated[Tag, Depends(get_existing_tag)]
 # Quy ước: endpoint ghi vào project / task / comment chỉ dùng các dependency trong phần này
 # (hoặc các dependency phân quyền dựng trên chúng); endpoint đọc dùng ProjectDep / TaskDep.
 # Nhờ vậy quy tắc "project đã archive thì chỉ đọc" chỉ nằm ở _raise_if_not_writable.
+#
+# 2 ngoại lệ có chủ đích (không đi qua phần này, có test):
+# - Bookmark / bỏ bookmark: dữ liệu cá nhân của người xem, không sửa gì trong project.
+# - Admin xóa tag: tag dùng chung toàn hệ thống; chặn thì tag từng gắn vào project đã archive sẽ
+#   không bao giờ xóa được. Task trong project archive mất tag đó (không ghi activity).
 def _raise_if_not_writable(status: ProjectStatus | None, not_found_message: str) -> None:
     if status is None:  # không tồn tại / vừa bị xóa bởi request khác
         raise NotFoundException(not_found_message)
-    if status == ProjectStatus.ARCHIVED:
+    # Chỉ ACTIVE mới ghi được: thêm status mới (vd ON_HOLD) thì mặc định là chỉ đọc
+    if status != ProjectStatus.ACTIVE:
         raise ConflictException(messages.PROJECT_ARCHIVED)
 
 
@@ -139,9 +145,15 @@ def get_writable_project(project: ProjectDep, db: DbSession) -> Project:
 WritableProject = Annotated[Project, Depends(get_writable_project)]
 
 
+def _ensure_task_writable(db: Session, task_id: int) -> None:
+    """Đường khóa duy nhất cho mọi thao tác ghi lên task / comment: khóa chia sẻ dòng project
+    chứa task (1 query JOIN theo task_id) và kiểm tra project còn ACTIVE."""
+    _raise_if_not_writable(crud.task.lock_project_status(db, task_id), messages.TASK_NOT_FOUND)
+
+
 def get_writable_task(task: TaskDep, db: DbSession) -> Task:
     """Task được sửa / xóa / comment: project chứa nó phải đang ACTIVE."""
-    _ensure_project_writable(db, task.project_id, messages.TASK_NOT_FOUND)
+    _ensure_task_writable(db, task.id)
     return task
 
 
@@ -149,8 +161,8 @@ WritableTask = Annotated[Task, Depends(get_writable_task)]
 
 
 def get_writable_task_id(task_id: int, db: DbSession) -> int:
-    """Như WritableTask nhưng chỉ cần task_id (assign): 1 query, không load cả task."""
-    _raise_if_not_writable(crud.task.lock_project_status(db, task_id), messages.TASK_NOT_FOUND)
+    """Như WritableTask nhưng chỉ cần task_id (assign): không load cả task."""
+    _ensure_task_writable(db, task_id)
     return task_id
 
 
@@ -249,7 +261,7 @@ def verify_comment_modifier(
     comment = crud.comment.get(db, task_id=task_id, comment_id=comment_id)
     if comment is None:
         raise NotFoundException(messages.COMMENT_NOT_FOUND)
-    _raise_if_not_writable(crud.task.lock_project_status(db, task_id), messages.TASK_NOT_FOUND)
+    _ensure_task_writable(db, task_id)
     if not permissions.can_modify_comment(user, comment):
         raise ForbiddenException(messages.COMMENT_MODIFY_FORBIDDEN)
     return comment
