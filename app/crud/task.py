@@ -180,10 +180,16 @@ def update(
     changed = [field for field, value in values.items() if getattr(task, field) != value]
     for field, value in values.items():
         setattr(task, field, value)
-    if labels is not None and {lb.id for lb in task.labels} != {lb.id for lb in labels}:
-        task.labels = labels
-        changed.append("labels")
-        touch(db, [task.id])
+    label_changes: list[tuple[ActivityAction, Label]] = []
+    if labels is not None:
+        old_ids, new_ids = {lb.id for lb in task.labels}, {lb.id for lb in labels}
+        removed = [lb for lb in task.labels if lb.id not in new_ids]
+        added = [lb for lb in labels if lb.id not in old_ids]
+        label_changes = [(ActivityAction.LABEL_REMOVED, lb) for lb in removed]
+        label_changes += [(ActivityAction.LABEL_ADDED, lb) for lb in added]
+        if label_changes:
+            task.labels = labels
+            touch(db, [task.id])
 
     if changed:
         activity_crud.add(
@@ -193,6 +199,8 @@ def update(
             action=ActivityAction.UPDATED,
             detail=f"changed: {', '.join(changed)}",
         )
+    for action, label in label_changes:  # mỗi label 1 activity, giống gắn / gỡ từng cái
+        add_label_activity(db, task=task, actor=actor, action=action, label_name=label.name)
     db.commit()
     return _reload(db, task.id)
 
@@ -226,6 +234,19 @@ def assign(db: Session, *, task: Task, assignee: User | None, actor: User) -> Ta
     return _reload(db, task.id)
 
 
+def add_label_activity(
+    db: Session,
+    *,
+    task: Task,
+    actor: User,
+    action: ActivityAction,
+    label_name: str,
+    reason: str | None = None,
+) -> None:
+    verb = "added" if action == ActivityAction.LABEL_ADDED else "removed"
+    detail = f"{verb} label {label_name}" + (f" ({reason})" if reason else "")
+    activity_crud.add(db, task=task, actor=actor, action=action, detail=detail)
+
 
 def set_label(db: Session, *, task: Task, label: Label, attached: bool, actor: User) -> Task:
     """Gắn / gỡ 1 label + ghi activity + cập nhật updated_at trong 1 commit. Idempotent: đã đúng
@@ -237,16 +258,11 @@ def set_label(db: Session, *, task: Task, label: Label, attached: bool, actor: U
         else:
             task.labels.remove(label)
         touch(db, [task.id])
-        verb = "added" if attached else "removed"
-        activity_crud.add(
-            db,
-            task=task,
-            actor=actor,
-            action=ActivityAction.UPDATED,
-            detail=f"{verb} label {label.name}",
-        )
+        action = ActivityAction.LABEL_ADDED if attached else ActivityAction.LABEL_REMOVED
+        add_label_activity(db, task=task, actor=actor, action=action, label_name=label.name)
         db.commit()
     return _reload(db, task.id)
+
 
 # ---------- Bookmark (Many-to-Many User <-> Task) ----------
 def is_bookmarked(db: Session, *, user_id: int, task_id: int) -> bool:

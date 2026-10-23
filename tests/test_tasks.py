@@ -191,7 +191,6 @@ def test_empty_and_out_of_range_pages(client, make_user, make_project, make_task
     assert (beyond.json()["items"], beyond.json()["pages"]) == ([], 2)
 
 
-
 def test_pages_never_exceed_max_page():
     # page > MAX_PAGE bị 422, nên `pages` cũng không được vượt MAX_PAGE
     huge = Page.build([], total=10**9, params=PageParams(page=1, limit=1))
@@ -337,7 +336,6 @@ def test_error_responses_are_documented(client):
     assert schema["$ref"].endswith("/ErrorResponse")
 
 
-
 def test_title_must_be_single_line(client, make_user, make_project, make_task):
     pm = make_user("pmuser")
     project = make_project(pm)
@@ -367,6 +365,7 @@ def test_in_review_status_and_urgent_priority(client, make_user, make_project, m
     )
 
     assert [t["title"] for t in resp.json()["items"]] == ["Review PR"]
+
 
 # ---------- N+1 query ----------
 def _seed_tasks(client, make_user, make_project, make_task, make_label, add_member, count: int):

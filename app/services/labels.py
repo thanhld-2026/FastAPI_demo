@@ -83,12 +83,13 @@ def delete_label(db: Session, label: Label, actor: User) -> None:
     tasks = crud.task.lock_tasks_with_label(db, label.id)
     crud.task.touch(db, [task.id for task in tasks])
     for task in tasks:
-        crud.activity.add(
+        crud.task.add_label_activity(
             db,
             task=task,
             actor=actor,
-            action=ActivityAction.UPDATED,
-            detail=f"removed label {name} (label deleted)",
+            action=ActivityAction.LABEL_REMOVED,
+            label_name=name,
+            reason="label deleted",
         )
     crud.label.delete(db, label)
     invalidate_cache(project_id)

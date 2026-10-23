@@ -87,6 +87,11 @@ def test_label_input_is_validated(client, setup):
     assert client.post(url, json={"name": "x" * 31}, headers=headers).status_code == 422
     bad_color = client.post(url, json={"name": "bug", "color": "red"}, headers=headers)
     assert bad_color.status_code == 422
+    # Tên chỉ gồm chữ thường, số, gạch ngang (giống tag cũ); chữ hoa được đổi trước khi kiểm tra
+    for name in ("bug fix", "bug\nfix", "bug_fix", "lỗi"):
+        assert client.post(url, json={"name": name}, headers=headers).status_code == 422, name
+    ok = client.post(url, json={"name": "Needs-Review"}, headers=headers)
+    assert (ok.status_code, ok.json()["name"]) == (201, "needs-review")
 
 
 def test_update_and_delete_label(client, make_label, make_task, setup):
@@ -129,8 +134,11 @@ def test_attach_and_detach_label(client, make_label, make_task, setup):
     assert [lb["name"] for lb in attached.json()["labels"]] == ["bug"]
     assert again.status_code == 200
     assert detached.json()["labels"] == []
-    # Gắn 2 lần chỉ ghi 1 activity
-    assert [a["detail"] for a in activities[1:]] == ["added label bug", "removed label bug"]
+    # Gắn 2 lần chỉ ghi 1 activity; action riêng cho label để FE lọc được
+    assert [(a["action"], a["detail"]) for a in activities[1:]] == [
+        ("label_added", "added label bug"),
+        ("label_removed", "removed label bug"),
+    ]
 
 
 def test_labels_of_another_project_cannot_be_used(
@@ -191,10 +199,11 @@ def test_deleting_label_is_logged_on_each_task(client, db, make_label, make_task
         headers = setup.owner["headers"]
         activity = client.get(f"{url}/activities", headers=headers).json()["items"][-1]
         changed = datetime.fromisoformat(client.get(url, headers=headers).json()["updated_at"])
-        return activity["detail"], changed > long_ago
+        return activity["action"], activity["detail"], changed > long_ago
 
-    assert [last(task) for task in tasks] == [("removed label bug (label deleted)", True)] * 2
-    assert last(untouched) == (None, False)
+    deleted = ("label_removed", "removed label bug (label deleted)", True)
+    assert [last(task) for task in tasks] == [deleted] * 2
+    assert last(untouched) == ("created", None, False)
 
 
 def test_changing_labels_updates_task_timestamp(client, db, make_label, make_task, setup):
@@ -218,3 +227,20 @@ def test_changing_labels_updates_task_timestamp(client, db, make_label, make_tas
     )
 
     assert (attach, detach, via_put) == (True, True, True)
+
+
+def test_put_label_ids_logs_one_activity_per_label(client, make_label, make_task, setup):
+    bug = make_label(setup.project, setup.owner, "bug")
+    docs = make_label(setup.project, setup.owner, "docs")
+    task = make_task(setup.project["id"], setup.owner, label_ids=[bug["id"]])
+    url = f"/api/v1/tasks/{task['id']}"
+    headers = setup.editor["headers"]
+
+    client.put(url, json={"title": "Renamed", "label_ids": [docs["id"]]}, headers=headers)
+
+    activities = client.get(f"{url}/activities", headers=headers).json()["items"]
+    assert [(a["action"], a["detail"]) for a in activities[1:]] == [
+        ("updated", "changed: title"),
+        ("label_removed", "removed label bug"),
+        ("label_added", "added label docs"),
+    ]

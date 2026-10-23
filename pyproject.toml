@@ -17,7 +17,12 @@ select = [
     "UP",      # pyupgrade
     "SIM",     # simplify
     "RUF",     # ruff-specific
+    # Dòng trống giữa hàm / class (E301-E306) còn là rule preview của ruff: bật riêng từng mã,
+    # explicit-preview-rules để không kéo theo các rule preview khác
+    "E301", "E302", "E303", "E304", "E305", "E306",
 ]
+preview = true
+explicit-preview-rules = true
 
 [tool.ruff.lint.isort]
 # Thư mục migration cũng tên `alembic/` -> chỉ rõ đây là thư viện, không phải code của project

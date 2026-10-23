@@ -106,7 +106,6 @@ app.add_middleware(
 app.add_exception_handler(AppException, app_exception_handler)
 
 
-
 # ---------- Routers ----------
 # Mọi API nghiệp vụ nằm dưới /api/v1 (router chỉ khai báo phần đường dẫn phía sau)
 routers = (auth, users, workspaces, projects, labels, tasks, comments)

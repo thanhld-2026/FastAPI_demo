@@ -82,7 +82,7 @@ Phiên đăng nhập gồm 2 token:
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 139 test (+9 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 140 test (+9 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 # Test khóa dòng (FOR SHARE / FOR UPDATE) cần PostgreSQL thật, DB rỗng dành riêng cho test:
 # (test xóa / tạo lại toàn bộ bảng nên tên DB bắt buộc kết thúc bằng _test, nếu không test dừng ngay)
@@ -162,9 +162,11 @@ Quy ước:
   response có `total` và `pages` (tổng số trang, tối thiểu 1). `page` vượt quá `pages` trả
   `items` rỗng. Tham số cũ `skip` bị từ chối (422) để client cũ không âm thầm nhận mãi trang 1.
 - Task: status `TODO` / `IN_PROGRESS` / `IN_REVIEW` / `DONE`, priority `LOW` / `MEDIUM` / `HIGH` / `URGENT`.
-- Label thuộc từng project (tên lưu chữ thường, không trùng trong project + màu hex), chỉ gắn
+- Label thuộc từng project (tên chỉ gồm chữ thường, số, gạch ngang như tag cũ, chữ hoa tự đổi
+  thành chữ thường; không trùng trong project; màu hex), chỉ gắn
   được label của đúng project chứa task. Gắn / gỡ label cập nhật `updated_at` của task và ghi
-  activity; xóa label thì ghi activity cho từng task đang dùng nó.
+  activity riêng `label_added` / `label_removed` (FE lọc được); xóa label thì ghi `label_removed`
+  cho từng task đang dùng nó.
   Danh sách label được cache Redis theo project, có version: thêm / sửa / xóa label (hoặc xóa
   project) thì tăng version của project đó, cache cũ không bao giờ được đọc lại.
 - Project: `ACTIVE` / `ARCHIVED`. Chỉ project `ACTIVE` mới ghi được: project đã archive thì chính
