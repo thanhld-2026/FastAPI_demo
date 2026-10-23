@@ -1,0 +1,36 @@
+# Cấu hình công cụ dev (cài bằng: pip install -r requirements-dev.txt)
+#   ruff check .        # lint + sắp xếp import
+#   mypy                # kiểm tra kiểu cho app/ và scripts/
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+# Migration do Alembic tự sinh, không sửa tay nên không lint
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # isort
+    "B",       # bugbear
+    "UP",      # pyupgrade
+    "SIM",     # simplify
+    "RUF",     # ruff-specific
+]
+
+[tool.ruff.lint.isort]
+# Thư mục migration cũng tên `alembic/` -> chỉ rõ đây là thư viện, không phải code của project
+known-third-party = ["alembic"]
+
+[tool.ruff.lint.per-file-ignores]
+# Bảng dữ liệu mẫu: giữ mỗi task 1 dòng cho dễ đọc
+"scripts/seed.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["app", "scripts"]
+plugins = ["pydantic.mypy"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true

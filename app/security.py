@@ -37,7 +37,10 @@ def create_access_token(subject: str | int, expires_delta: timedelta | None = No
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
-    """Giải mã + verify chữ ký + kiểm tra hạn (exp). Raise jwt.InvalidTokenError nếu không hợp lệ."""
+    """Giải mã + verify chữ ký + kiểm tra hạn (exp).
+
+    Raise jwt.InvalidTokenError nếu token không hợp lệ.
+    """
     return jwt.decode(
         token,
         settings.SECRET_KEY,

@@ -83,7 +83,7 @@ def seed() -> None:
             (backend, "API đăng ký / đăng nhập JWT", TaskStatus.DONE, TaskPriority.HIGH, "alice", "carol", ["backend", "feature"], -3),
             (backend, "Phân quyền PM / Admin", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, "alice", "dave", ["backend", "feature"], 2),
             (backend, "Cache danh sách tag bằng Redis", TaskStatus.TODO, TaskPriority.MEDIUM, "carol", None, ["backend"], 5),
-            (backend, "Viết integration test", TaskStatus.TODO, TaskPriority.MEDIUM, "alice", "dave", ["backend", "docs"], 7),
+            (backend, "Viết integration test", TaskStatus.IN_REVIEW, TaskPriority.MEDIUM, "alice", "dave", ["backend", "docs"], 7),
             (backend, "Fix lỗi 500 khi token hết hạn", TaskStatus.TODO, TaskPriority.HIGH, "dave", None, ["bug", "urgent"], 1),
             (mobile, "Màn hình đăng nhập", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, "bob", "carol", ["mobile", "frontend"], 3),
             (mobile, "Danh sách task theo project", TaskStatus.TODO, TaskPriority.MEDIUM, "bob", None, ["mobile", "feature"], 10),

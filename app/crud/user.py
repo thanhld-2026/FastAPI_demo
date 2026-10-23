@@ -68,8 +68,8 @@ def authenticate(db: Session, identifier: str, password: str) -> User | None:
 
 
 def list_users(db: Session, pagination: PageParams) -> tuple[list[User], int]:
-    total = db.scalar(select(func.count()).select_from(User))
-    stmt = select(User).order_by(User.id).offset(pagination.skip).limit(pagination.limit)
+    total = db.execute(select(func.count()).select_from(User)).scalar_one()
+    stmt = select(User).order_by(User.id).offset(pagination.offset).limit(pagination.limit)
     users = db.scalars(stmt).all()
     return list(users), total
 

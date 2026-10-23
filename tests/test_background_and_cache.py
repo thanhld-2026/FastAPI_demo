@@ -31,11 +31,13 @@ def test_comment_notifies_task_creator_and_assignee(
     dev = make_user("dev")
     task = make_task(make_project(pm)["id"], creator, title="Payment API")
     client.post(
-        f"/api/tasks/{task['id']}/assign", json={"assignee_id": dev["id"]}, headers=pm["headers"]
+        f"/api/v1/tasks/{task['id']}/assign", json={"assignee_id": dev["id"]}, headers=pm["headers"]
     )
 
     resp = client.post(
-        f"/api/tasks/{task['id']}/comments", json={"content": "Please review"}, headers=pm["headers"]
+        f"/api/v1/tasks/{task['id']}/comments",
+        json={"content": "Please review"},
+        headers=pm["headers"],
     )
 
     # TestClient chạy xong background task rồi mới trả về -> kiểm tra ngay được
@@ -51,7 +53,9 @@ def test_commenter_does_not_notify_themselves(
     pm = make_user("pmuser")
     task = make_task(make_project(pm)["id"], pm)  # pm vừa là creator vừa là người comment
 
-    client.post(f"/api/tasks/{task['id']}/comments", json={"content": "Note"}, headers=pm["headers"])
+    client.post(
+        f"/api/v1/tasks/{task['id']}/comments", json={"content": "Note"}, headers=pm["headers"]
+    )
 
     assert sent_emails == []
 
@@ -86,10 +90,10 @@ def fake_redis(monkeypatch) -> fakeredis.FakeRedis:
 def test_tags_are_cached_and_invalidated_on_change(client, make_tag, fake_redis):
     make_tag("backend")
 
-    first = client.get("/api/tags")
-    second = client.get("/api/tags")
+    first = client.get("/api/v1/tags")
+    second = client.get("/api/v1/tags")
     make_tag("frontend")  # tạo tag mới -> xóa cache
-    third = client.get("/api/tags")
+    third = client.get("/api/v1/tags")
 
     assert first.headers["X-Cache"] == "MISS"
     assert second.headers["X-Cache"] == "HIT"
@@ -102,7 +106,7 @@ def test_tags_are_cached_and_invalidated_on_change(client, make_tag, fake_redis)
 def test_tags_work_without_redis(client, make_tag):
     make_tag("backend")
 
-    resp = client.get("/api/tags")
+    resp = client.get("/api/v1/tags")
 
     assert resp.status_code == 200
     assert resp.headers["X-Cache"] == "MISS"
@@ -113,7 +117,7 @@ def test_tags_fall_back_to_database_when_redis_is_down(client, make_tag, monkeyp
     monkeypatch.setattr(cache, "get_redis", lambda: unreachable)
     make_tag("backend")
 
-    resp = client.get("/api/tags")
+    resp = client.get("/api/v1/tags")
 
     assert resp.status_code == 200
     assert [t["name"] for t in resp.json()] == ["backend"]
@@ -123,10 +127,10 @@ def test_only_admin_can_manage_tags(client, make_user):
     member = make_user("member")
     admin = make_user("boss", admin=True)
 
-    forbidden = client.post("/api/tags", json={"name": "x"}, headers=member["headers"])
-    created = client.post("/api/tags", json={"name": "  Backend "}, headers=admin["headers"])
-    duplicate = client.post("/api/tags", json={"name": "backend"}, headers=admin["headers"])
-    deleted = client.delete(f"/api/tags/{created.json()['id']}", headers=admin["headers"])
+    forbidden = client.post("/api/v1/tags", json={"name": "x"}, headers=member["headers"])
+    created = client.post("/api/v1/tags", json={"name": "  Backend "}, headers=admin["headers"])
+    duplicate = client.post("/api/v1/tags", json={"name": "backend"}, headers=admin["headers"])
+    deleted = client.delete(f"/api/v1/tags/{created.json()['id']}", headers=admin["headers"])
 
     assert forbidden.status_code == 403
     assert created.status_code == 201

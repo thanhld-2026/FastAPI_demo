@@ -5,6 +5,8 @@ handler sẽ trả JSON `{"detail": "..."}` (giữ cùng format với HTTPExcept
 với status code tương ứng của từng loại lỗi.
 """
 
+from typing import cast
+
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 
@@ -44,7 +46,11 @@ class ConflictException(AppException):
     status_code = status.HTTP_409_CONFLICT
 
 
-async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
+async def app_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    # Starlette khai báo handler nhận Exception; handler này chỉ đăng ký cho AppException
+    app_exc = cast(AppException, exc)
     return JSONResponse(
-        status_code=exc.status_code, content={"detail": exc.message}, headers=exc.headers
+        status_code=app_exc.status_code,
+        content={"detail": app_exc.message},
+        headers=app_exc.headers,
     )

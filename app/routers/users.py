@@ -22,7 +22,7 @@ from app.schemas.task import TaskOut
 from app.schemas.user import AdminUserUpdate, Token, UserCreate, UserOut, UserUpdate
 from app.security import create_access_token
 
-router = APIRouter(prefix="/api/users", tags=["Users"])
+router = APIRouter(prefix="/users", tags=["Users"])
 
 
 @router.post(
@@ -80,8 +80,12 @@ def read_me(current_user: CurrentUser):
     responses=error_responses(401, 403, 409),
 )
 def update_me(data: UserUpdate, current_user: CurrentUser, db: DbSession):
-    email_changed = data.email and data.email.lower() != current_user.email
-    if email_changed and crud.user.get_by_email(db, data.email):
+    email_taken = (
+        data.email is not None
+        and data.email.lower() != current_user.email
+        and crud.user.get_by_email(db, data.email) is not None
+    )
+    if email_taken:
         raise ConflictException(messages.EMAIL_TAKEN)
     try:
         return crud.user.update(db, current_user, data)

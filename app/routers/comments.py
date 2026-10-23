@@ -8,13 +8,13 @@ from app.dependencies import (
     ExistingTaskId,
     ModifiableComment,
     Pagination,
-    TaskDep,
+    WritableTask,
 )
 from app.schemas.comment import CommentCreate, CommentOut, CommentUpdate
 from app.schemas.common import Page
 from app.services import comments as comment_service
 
-router = APIRouter(prefix="/api/tasks/{task_id}/comments", tags=["Comments"])
+router = APIRouter(prefix="/tasks/{task_id}/comments", tags=["Comments"])
 
 
 @router.get(
@@ -33,12 +33,12 @@ def list_comments(task_id: ExistingTaskId, db: DbSession, pagination: Pagination
     response_model=CommentOut,
     status_code=status.HTTP_201_CREATED,
     summary="Thêm comment (gửi email thông báo chạy ngầm)",
-    responses=error_responses(401, 403, 404),
+    responses=error_responses(401, 403, 404, 409),
 )
 def create_comment(
     data: CommentCreate,
-    task: TaskDep,
     current_user: CurrentUser,
+    task: WritableTask,
     db: DbSession,
     background_tasks: BackgroundTasks,
 ):
@@ -51,7 +51,7 @@ def create_comment(
     "/{comment_id}",
     response_model=CommentOut,
     summary="Sửa comment (tác giả / PM / Admin)",
-    responses=error_responses(401, 403, 404),
+    responses=error_responses(401, 403, 404, 409),
 )
 def update_comment(data: CommentUpdate, comment: ModifiableComment, db: DbSession):
     return crud.comment.update(db, comment, data)
@@ -61,7 +61,7 @@ def update_comment(data: CommentUpdate, comment: ModifiableComment, db: DbSessio
     "/{comment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Xóa comment (tác giả / PM / Admin)",
-    responses=error_responses(401, 403, 404),
+    responses=error_responses(401, 403, 404, 409),
 )
 def delete_comment(comment: ModifiableComment, db: DbSession):
     crud.comment.delete(db, comment)

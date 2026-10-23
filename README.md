@@ -61,11 +61,16 @@ Tất cả dùng chung mật khẩu **`Password123`**.
 
 Đăng nhập trên Swagger: bấm nút **Authorize**, nhập username/password (hoặc email/password).
 
-## 4. Chạy test
+## 4. Chạy test & lint
 
 ```bash
-pytest          # 72 test, khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 94 test (+5 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
+# Test khóa dòng (FOR SHARE / FOR UPDATE) cần PostgreSQL thật, DB rỗng dành riêng cho test:
+# (test xóa / tạo lại toàn bộ bảng nên tên DB bắt buộc kết thúc bằng _test, nếu không test dừng ngay)
+TEST_POSTGRES_URL=postgresql+psycopg://taskhub:taskhub@localhost:5432/taskhub_test pytest -m postgres
+ruff check .    # lint (cấu hình trong pyproject.toml)
+mypy            # kiểm tra kiểu cho app/ và scripts/
 ```
 
 ## 5. Cấu trúc thư mục
@@ -123,34 +128,44 @@ Quy ước:
 
 - Các API **đọc** (GET) công khai, các API **ghi** đều cần đăng nhập. PM là người tạo project.
   Khi làm RBAC theo workspace (phụ lục đặc tả), quyền đọc sẽ theo membership và cần đăng nhập.
-- Danh sách phân trang bằng `skip` / `limit` (mặc định 20, tối đa 100), response có `total`.
+- Mọi API nằm dưới prefix `/api/v1`.
+- Danh sách phân trang bằng `page` (1 tới 10 000) + `limit` (mặc định 20, tối đa 100),
+  response có `total` và `pages` (tổng số trang, tối thiểu 1). `page` vượt quá `pages` trả
+  `items` rỗng. Tham số cũ `skip` bị từ chối (422) để client cũ không âm thầm nhận mãi trang 1.
+- Task: status `TODO` / `IN_PROGRESS` / `IN_REVIEW` / `DONE`, priority `LOW` / `MEDIUM` / `HIGH` / `URGENT`.
+- Project: `ACTIVE` / `ARCHIVED`. Chỉ project `ACTIVE` mới ghi được: project đã archive thì chính
+  project, task và comment bên trong chỉ đọc được (mọi thao tác ghi, kể cả sửa / xóa project, trả
+  `409`), PM / Admin unarchive để mở lại. 2 ngoại lệ có chủ đích: bookmark (dữ liệu cá nhân) và admin
+  xóa tag (tag dùng chung toàn hệ thống, task trong project archive mất tag đó).
+- Cột "Mục đề": số mục của tutorial; `PL n` là feature n trong phụ lục đặc tả sample app.
 
 | Method | Endpoint | Quyền | Mục đề |
 |---|---|---|---|
-| POST | `/api/users/register` | Công khai | 4 |
-| POST | `/api/users/login` | Công khai | 4 |
-| GET / PUT | `/api/users/me` | Đã đăng nhập | 4 |
-| GET | `/api/users/me/bookmarks` | Đã đăng nhập (phân trang) | 5 |
-| GET | `/api/users/{username}/profile` | Công khai | 3 |
-| GET | `/api/users` | Admin | 5 |
-| PATCH | `/api/users/{user_id}` | Admin (đổi role, khóa tài khoản) | 5 |
-| GET | `/api/projects` | Công khai (phân trang) | 2 |
-| POST | `/api/projects` | Đã đăng nhập (người tạo thành PM) | 2 |
-| GET | `/api/projects/{project_id}` | Công khai (kèm tasks lồng nhau) | 2, 3 |
-| PUT / DELETE | `/api/projects/{project_id}` | PM / Admin | 5 |
-| GET | `/api/projects/{project_id}/tasks` | Công khai (lọc + phân trang) | 3, 5 |
-| POST | `/api/projects/{project_id}/tasks` | Đã đăng nhập | 3 |
-| GET | `/api/tasks?status=&priority=&project_id=&assignee_id=&q=` | Công khai (lọc + phân trang) | 5 |
-| GET | `/api/tasks/{task_id}` | Công khai | 3 |
-| PUT | `/api/tasks/{task_id}` | Người tạo / người được assign / PM / Admin | 6 |
-| DELETE | `/api/tasks/{task_id}` | Người tạo / PM / Admin | 6 |
-| POST | `/api/tasks/{task_id}/assign` | PM / Admin | 6 |
-| POST / DELETE | `/api/tasks/{task_id}/bookmark` | Đã đăng nhập | 5 |
-| GET | `/api/tasks/{task_id}/activities` | Công khai (phân trang) | 6 |
-| GET / POST | `/api/tasks/{task_id}/comments` | GET công khai (phân trang), POST cần đăng nhập (gửi email ngầm) | 6, 7 |
-| PUT / DELETE | `/api/tasks/{task_id}/comments/{comment_id}` | Tác giả / PM / Admin | 6 |
-| GET | `/api/tags` | Công khai (cache Redis) | 2, 7 |
-| POST / DELETE | `/api/tags`, `/api/tags/{tag_id}` | Admin | 7 |
+| POST | `/api/v1/users/register` | Công khai | 4 |
+| POST | `/api/v1/users/login` | Công khai | 4 |
+| GET / PUT | `/api/v1/users/me` | Đã đăng nhập | 4 |
+| GET | `/api/v1/users/me/bookmarks` | Đã đăng nhập (phân trang) | 5 |
+| GET | `/api/v1/users/{username}/profile` | Công khai | 3 |
+| GET | `/api/v1/users` | Admin | 5 |
+| PATCH | `/api/v1/users/{user_id}` | Admin (đổi role, khóa tài khoản) | 5 |
+| GET | `/api/v1/projects?status=` | Công khai (lọc theo status + phân trang) | 2, PL 4 |
+| POST | `/api/v1/projects` | Đã đăng nhập (người tạo thành PM) | 2 |
+| GET | `/api/v1/projects/{project_id}` | Công khai (kèm tasks lồng nhau) | 2, 3 |
+| PUT / DELETE | `/api/v1/projects/{project_id}` | PM / Admin | 5 |
+| POST | `/api/v1/projects/{project_id}/archive`, `.../unarchive` | PM / Admin (idempotent) | PL 4 |
+| GET | `/api/v1/projects/{project_id}/tasks` | Công khai (lọc + phân trang) | 3, 5 |
+| POST | `/api/v1/projects/{project_id}/tasks` | Đã đăng nhập | 3 |
+| GET | `/api/v1/tasks?status=&priority=&project_id=&assignee_id=&q=` | Công khai (lọc + phân trang) | 5 |
+| GET | `/api/v1/tasks/{task_id}` | Công khai | 3 |
+| PUT | `/api/v1/tasks/{task_id}` | Người tạo / người được assign / PM / Admin | 6 |
+| DELETE | `/api/v1/tasks/{task_id}` | Người tạo / PM / Admin | 6 |
+| POST | `/api/v1/tasks/{task_id}/assign` | PM / Admin | 6 |
+| POST / DELETE | `/api/v1/tasks/{task_id}/bookmark` | Đã đăng nhập | 5 |
+| GET | `/api/v1/tasks/{task_id}/activities` | Công khai (phân trang) | 6 |
+| GET / POST | `/api/v1/tasks/{task_id}/comments` | GET công khai (phân trang), POST cần đăng nhập (gửi email ngầm) | 6, 7 |
+| PUT / DELETE | `/api/v1/tasks/{task_id}/comments/{comment_id}` | Tác giả / PM / Admin | 6 |
+| GET | `/api/v1/tags` | Công khai (cache Redis) | 2, 7 |
+| POST / DELETE | `/api/v1/tags`, `/api/v1/tags/{tag_id}` | Admin | 7 |
 | GET | `/health` | Công khai | 8 |
 
 Lỗi luôn trả về dạng `{"detail": "..."}`, mã lỗi của từng endpoint được document trên Swagger:
@@ -159,5 +174,5 @@ Lỗi luôn trả về dạng `{"detail": "..."}`, mã lỗi của từng endpoi
 - `403`: đã đăng nhập nhưng không đủ quyền.
 - `404`: resource trên URL không tồn tại.
 - `400`: body tham chiếu tới dữ liệu không tồn tại (tag_ids, assignee_id).
-- `409`: trùng dữ liệu (username, email, tag).
+- `409`: trùng dữ liệu (username, email, tag) hoặc project đã archive.
 - `422`: dữ liệu sai định dạng.

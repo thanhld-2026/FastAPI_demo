@@ -21,15 +21,15 @@ def add(
 def list_for_task(
     db: Session, task_id: int, pagination: PageParams
 ) -> tuple[list[TaskActivity], int]:
-    total = db.scalar(
+    total = db.execute(
         select(func.count()).select_from(TaskActivity).where(TaskActivity.task_id == task_id)
-    )
+    ).scalar_one()
     stmt = (
         select(TaskActivity)
         .where(TaskActivity.task_id == task_id)
         .options(joinedload(TaskActivity.actor))
         .order_by(TaskActivity.id)
-        .offset(pagination.skip)
+        .offset(pagination.offset)
         .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total

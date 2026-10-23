@@ -19,6 +19,9 @@ ADMIN_CANNOT_DEMOTE_SELF = "Admins cannot demote or deactivate themselves"
 # --- Project ---
 PROJECT_NOT_FOUND = "Project not found"
 PROJECT_MANAGER_REQUIRED = "Only the project manager or an admin can perform this action"
+PROJECT_ARCHIVED = (
+    "Project is archived: it is read-only together with its tasks and comments, unarchive it first"
+)
 
 # --- Task ---
 TASK_NOT_FOUND = "Task not found"
@@ -40,6 +43,9 @@ TAG_IDS_NOT_FOUND = "Tag ids not found: {ids}"
 
 # --- Validate input (schema) ---
 FIELD_CANNOT_BE_NULL = "{field} cannot be null"
+SKIP_PARAM_REMOVED = (
+    "skip is no longer supported, use page (page N starts at item (N - 1) * limit)"
+)
 PASSWORD_TOO_LONG = "Password is too long (max {max_bytes} bytes)"
 DUE_DATE_IN_PAST = "due_date cannot be in the past"
 TITLE_MUST_BE_SINGLE_LINE = "title must not contain line breaks"

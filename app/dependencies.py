@@ -8,7 +8,8 @@ Chuỗi phụ thuộc xác thực / phân quyền:
                                                                           (chỉ PM/admin của project)
 
 Tương tự cho task / comment: verify_task_editor, verify_task_deleter, get_task_for_assign,
-verify_comment_modifier.
+verify_comment_modifier. Endpoint ghi dùng WritableProject / WritableTask / ChangeableProject
+(project đã archive -> 409), xem phần "Load resource để GHI".
 Endpoint chỉ cần khai báo `current_user: CurrentUser` là FastAPI tự chạy cả chuỗi.
 """
 
@@ -16,25 +17,27 @@ from typing import Annotated
 
 import jwt
 from fastapi import Depends, Query
+from fastapi.exceptions import RequestValidationError
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app import crud, permissions
 from app.core import messages
-from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from app.core.constants import API_V1_PREFIX, DEFAULT_PAGE_SIZE, MAX_PAGE, MAX_PAGE_SIZE
 from app.core.exceptions import (
     BadRequestException,
+    ConflictException,
     ForbiddenException,
     NotFoundException,
     UnauthorizedException,
 )
 from app.database import get_db
-from app.models import Comment, Project, Tag, Task, User
+from app.models import Comment, Project, ProjectStatus, Tag, Task, User
 from app.schemas.common import PageParams
 from app.security import decode_access_token
 
 # tokenUrl: endpoint đăng nhập -> Swagger UI dùng để hiện nút "Authorize"
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/users/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{API_V1_PREFIX}/users/login")
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -103,7 +106,73 @@ def get_existing_tag(tag_id: int, db: DbSession) -> Tag:
 TagDep = Annotated[Tag, Depends(get_existing_tag)]
 
 
+# ---------- Load resource để GHI: project phải đang ACTIVE ----------
+# Quy ước: endpoint ghi vào project / task / comment chỉ dùng các dependency trong phần này
+# (hoặc các dependency phân quyền dựng trên chúng); endpoint đọc dùng ProjectDep / TaskDep.
+# Nhờ vậy quy tắc "project đã archive thì chỉ đọc" chỉ nằm ở _raise_if_not_writable.
+#
+# 2 ngoại lệ có chủ đích (không đi qua phần này, có test):
+# - Bookmark / bỏ bookmark: dữ liệu cá nhân của người xem, không sửa gì trong project.
+# - Admin xóa tag: tag dùng chung toàn hệ thống; chặn thì tag từng gắn vào project đã archive sẽ
+#   không bao giờ xóa được. Task trong project archive mất tag đó (không ghi activity).
+def _raise_if_not_writable(status: ProjectStatus | None, not_found_message: str) -> None:
+    if status is None:  # không tồn tại / vừa bị xóa bởi request khác
+        raise NotFoundException(not_found_message)
+    # Chỉ ACTIVE mới ghi được: thêm status mới (vd ON_HOLD) thì mặc định là chỉ đọc
+    if status != ProjectStatus.ACTIVE:
+        raise ConflictException(messages.PROJECT_ARCHIVED)
+
+
+def _ensure_project_writable(db: Session, project_id: int, not_found_message: str) -> None:
+    """Khóa chia sẻ dòng project (FOR SHARE) và kiểm tra project còn ACTIVE."""
+    _raise_if_not_writable(crud.project.lock_status(db, project_id), not_found_message)
+
+
+def _lock_project(db: Session, project_id: int) -> Project:
+    """Khóa độc quyền + đọc lại dòng project (dùng khi sắp sửa / xóa chính dòng đó)."""
+    project = crud.project.get_for_update(db, project_id)
+    if project is None:  # vừa bị xóa bởi request khác
+        raise NotFoundException(messages.PROJECT_NOT_FOUND)
+    return project
+
+
+def get_writable_project(project: ProjectDep, db: DbSession) -> Project:
+    """Project nhận thêm dữ liệu (vd tạo task): khóa chia sẻ dòng project."""
+    _ensure_project_writable(db, project.id, messages.PROJECT_NOT_FOUND)
+    return project
+
+
+WritableProject = Annotated[Project, Depends(get_writable_project)]
+
+
+def _ensure_task_writable(db: Session, task_id: int) -> None:
+    """Đường khóa duy nhất cho mọi thao tác ghi lên task / comment: khóa chia sẻ dòng project
+    chứa task (1 query JOIN theo task_id) và kiểm tra project còn ACTIVE."""
+    _raise_if_not_writable(crud.task.lock_project_status(db, task_id), messages.TASK_NOT_FOUND)
+
+
+def get_writable_task(task: TaskDep, db: DbSession) -> Task:
+    """Task được sửa / xóa / comment: project chứa nó phải đang ACTIVE."""
+    _ensure_task_writable(db, task.id)
+    return task
+
+
+WritableTask = Annotated[Task, Depends(get_writable_task)]
+
+
+def get_writable_task_id(task_id: int, db: DbSession) -> int:
+    """Như WritableTask nhưng chỉ cần task_id (assign): không load cả task."""
+    _ensure_task_writable(db, task_id)
+    return task_id
+
+
+WritableTaskId = Annotated[int, Depends(get_writable_task_id)]
+
+
 # ---------- Phân quyền (Authorization): "Bạn được làm gì?" ----------
+# Thứ tự lỗi: 401 (chưa đăng nhập) -> 404 (không có resource) -> 409 (project đã archive)
+# -> 403 (không đủ quyền). Tham số `user` luôn khai báo trước để 401 được kiểm tra đầu tiên;
+# 409 trước 403 không lộ gì vì status của project vốn công khai (GET project).
 def verify_admin_role(user: CurrentUser) -> User:
     if not permissions.is_admin(user):
         raise ForbiddenException(messages.ADMIN_REQUIRED)
@@ -113,17 +182,42 @@ def verify_admin_role(user: CurrentUser) -> User:
 AdminUser = Annotated[User, Depends(verify_admin_role)]
 
 
-def verify_project_manager(project: ProjectDep, user: CurrentUser) -> Project:
-    """Chỉ PM (owner) của project hoặc admin mới qua được. Trả về luôn project để endpoint dùng."""
+def _require_project_manager(user: User, project: Project) -> None:
     if not permissions.can_manage_project(user, project):
         raise ForbiddenException(messages.PROJECT_MANAGER_REQUIRED)
-    return project
+
+
+def verify_project_manager(user: CurrentUser, project: ProjectDep, db: DbSession) -> Project:
+    """Archive / unarchive: chỉ PM (owner) của project hoặc admin, ở trạng thái nào cũng được.
+
+    Kiểm tra quyền trước, rồi mới khóa độc quyền + đọc lại: archive / unarchive / xóa chạy song
+    song sẽ xếp hàng thay vì ghi đè nhau (hoặc lỗi 500 khi dòng vừa bị xóa).
+    """
+    _require_project_manager(user, project)
+    return _lock_project(db, project.id)
 
 
 ManagedProject = Annotated[Project, Depends(verify_project_manager)]
 
 
-def verify_task_editor(task: TaskDep, user: CurrentUser) -> Task:
+def get_project_for_change(user: CurrentUser, project: ProjectDep, db: DbSession) -> Project:
+    """Sửa / xóa project: project phải ACTIVE, user là PM / admin.
+
+    409 / 403 được kiểm tra trên bản đọc thường (chưa khóa) để người không có quyền không chiếm
+    được khóa độc quyền của project người khác; qua được mới khóa + đọc lại và kiểm tra lại status
+    (có thể vừa bị archive trong lúc chờ khóa).
+    """
+    _raise_if_not_writable(project.status, messages.PROJECT_NOT_FOUND)
+    _require_project_manager(user, project)
+    locked = _lock_project(db, project.id)
+    _raise_if_not_writable(locked.status, messages.PROJECT_NOT_FOUND)
+    return locked
+
+
+ChangeableProject = Annotated[Project, Depends(get_project_for_change)]
+
+
+def verify_task_editor(user: CurrentUser, task: WritableTask) -> Task:
     """Người tạo / người được assign / PM / admin mới được sửa task."""
     if not permissions.can_edit_task(user, task):
         raise ForbiddenException(messages.TASK_EDIT_FORBIDDEN)
@@ -133,7 +227,7 @@ def verify_task_editor(task: TaskDep, user: CurrentUser) -> Task:
 EditableTask = Annotated[Task, Depends(verify_task_editor)]
 
 
-def verify_task_deleter(task: TaskDep, user: CurrentUser) -> Task:
+def verify_task_deleter(user: CurrentUser, task: WritableTask) -> Task:
     """Người tạo / PM / admin mới được xóa task."""
     if not permissions.can_delete_task(user, task):
         raise ForbiddenException(messages.TASK_DELETE_FORBIDDEN)
@@ -143,28 +237,31 @@ def verify_task_deleter(task: TaskDep, user: CurrentUser) -> Task:
 DeletableTask = Annotated[Task, Depends(verify_task_deleter)]
 
 
-def get_task_for_assign(task_id: int, db: DbSession, user: CurrentUser) -> Task:
+def get_task_for_assign(user: CurrentUser, task_id: WritableTaskId, db: DbSession) -> Task:
     """Khóa dòng task (SELECT ... FOR UPDATE) tới hết transaction rồi mới kiểm tra quyền:
-    2 PM assign cùng 1 task cùng lúc thì request sau phải chờ request trước commit xong."""
-    task = crud.task.get_for_update(db, task_id)
-    if task is None:
+    2 PM assign cùng 1 task cùng lúc thì request sau phải chờ request trước commit xong.
+    Dùng WritableTaskId (1 query) thay vì WritableTask: task sẽ được đọc lại khi khóa."""
+    locked = crud.task.get_for_update(db, task_id)
+    if locked is None:  # task vừa bị xóa bởi request khác
         raise NotFoundException(messages.TASK_NOT_FOUND)
-    if not permissions.can_manage_project(user, task.project):
+    if not permissions.can_manage_project(user, locked.project):
         raise ForbiddenException(messages.TASK_ASSIGN_FORBIDDEN)
-    return task
+    return locked
 
 
 AssignableTask = Annotated[Task, Depends(get_task_for_assign)]
 
 
 def verify_comment_modifier(
-    task_id: int, comment_id: int, db: DbSession, user: CurrentUser
+    user: CurrentUser, task_id: int, comment_id: int, db: DbSession
 ) -> Comment:
     """Chỉ tác giả comment, PM của project hoặc admin mới được sửa / xóa.
-    Lọc theo cả task_id để chặn truy cập chéo: /tasks/1/comments/<id comment của task 2>."""
+    Lọc theo cả task_id để chặn truy cập chéo: /tasks/1/comments/<id comment của task 2>.
+    Tìm comment (404) trước khi kiểm tra archive (409), đúng thứ tự 404 -> 409 -> 403."""
     comment = crud.comment.get(db, task_id=task_id, comment_id=comment_id)
     if comment is None:
         raise NotFoundException(messages.COMMENT_NOT_FOUND)
+    _ensure_task_writable(db, task_id)
     if not permissions.can_modify_comment(user, comment):
         raise ForbiddenException(messages.COMMENT_MODIFY_FORBIDDEN)
     return comment
@@ -175,12 +272,26 @@ ModifiableComment = Annotated[Comment, Depends(verify_comment_modifier)]
 
 # ---------- Phân trang ----------
 def get_pagination(
-    skip: Annotated[int, Query(ge=0, description="Số bản ghi bỏ qua")] = 0,
+    page: Annotated[int, Query(ge=1, le=MAX_PAGE, description="Số trang, bắt đầu từ 1")] = 1,
     limit: Annotated[
         int, Query(ge=1, le=MAX_PAGE_SIZE, description="Số bản ghi tối đa của 1 trang")
     ] = DEFAULT_PAGE_SIZE,
+    skip: Annotated[str | None, Query(include_in_schema=False)] = None,
 ) -> PageParams:
-    return PageParams(skip=skip, limit=limit)
+    if skip is not None:
+        # Tham số cũ (trước /api/v1): FastAPI mặc định bỏ qua query param lạ -> client cũ gửi
+        # ?skip=20 sẽ luôn nhận trang 1 (vòng lặp phân trang chạy mãi). Báo lỗi 422 rõ ràng.
+        raise RequestValidationError(
+            [
+                {
+                    "type": "extra_forbidden",
+                    "loc": ("query", "skip"),
+                    "msg": messages.SKIP_PARAM_REMOVED,
+                    "input": skip,
+                }
+            ]
+        )
+    return PageParams(page=page, limit=limit)
 
 
 Pagination = Annotated[PageParams, Depends(get_pagination)]

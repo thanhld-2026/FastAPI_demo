@@ -1,5 +1,5 @@
+from sqlalchemy import Select, exists, func, insert, select
 from sqlalchemy import delete as sql_delete
-from sqlalchemy import exists, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -7,6 +7,7 @@ from app.crud import activity as activity_crud
 from app.models import (
     ActivityAction,
     Project,
+    ProjectStatus,
     Tag,
     Task,
     TaskPriority,
@@ -28,9 +29,17 @@ TASK_LOAD_OPTIONS = (
 )
 
 
+def _select_task(task_id: int) -> Select[Task]:
+    return select(Task).where(Task.id == task_id).options(*TASK_LOAD_OPTIONS)
+
+
 def get(db: Session, task_id: int) -> Task | None:
-    stmt = select(Task).where(Task.id == task_id).options(*TASK_LOAD_OPTIONS)
-    return db.scalar(stmt)
+    return db.scalar(_select_task(task_id))
+
+
+def _reload(db: Session, task_id: int) -> Task:
+    """Đọc lại task vừa ghi (chắc chắn tồn tại) kèm eager loading để trả về response."""
+    return db.scalars(_select_task(task_id)).one()
 
 
 def get_for_update(db: Session, task_id: int) -> Task | None:
@@ -44,6 +53,18 @@ def get_for_update(db: Session, task_id: int) -> Task | None:
         .where(Task.id == task_id)
         .with_for_update()
         .execution_options(populate_existing=True)
+    )
+    return db.scalar(stmt)
+
+
+def lock_project_status(db: Session, task_id: int) -> ProjectStatus | None:
+    """Status của project chứa task, khóa chia sẻ dòng project (giống crud.project.lock_status)
+    trong 1 query JOIN, không cần load cả task. None nếu task không tồn tại."""
+    stmt = (
+        select(Project.status)
+        .join(Task, Task.project_id == Project.id)
+        .where(Task.id == task_id)
+        .with_for_update(read=True, of=Project)
     )
     return db.scalar(stmt)
 
@@ -76,13 +97,13 @@ def list_tasks(
         # autoescape: ký tự % và _ trong từ khóa được hiểu là ký tự thường
         conditions.append(Task.title.icontains(search, autoescape=True))
 
-    total = db.scalar(select(func.count()).select_from(Task).where(*conditions))
+    total = db.execute(select(func.count()).select_from(Task).where(*conditions)).scalar_one()
     stmt = (
         select(Task)
         .where(*conditions)
         .options(*TASK_LOAD_OPTIONS)
         .order_by(Task.id.desc())
-        .offset(pagination.skip)
+        .offset(pagination.offset)
         .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total
@@ -95,7 +116,7 @@ def create(
     db.add(task)
     activity_crud.add(db, task=task, actor=creator, action=ActivityAction.CREATED)
     db.commit()  # task + activity được lưu trong cùng 1 transaction
-    return get(db, task.id)
+    return _reload(db, task.id)
 
 
 def update(
@@ -118,7 +139,7 @@ def update(
             detail=f"changed: {', '.join(changed)}",
         )
     db.commit()
-    return get(db, task.id)
+    return _reload(db, task.id)
 
 
 def delete(db: Session, task: Task) -> None:
@@ -147,7 +168,7 @@ def assign(db: Session, *, task: Task, assignee: User | None, actor: User) -> Ta
             detail=f"assigned to {assignee.username}" if assignee else "unassigned",
         )
         db.commit()
-    return get(db, task.id)
+    return _reload(db, task.id)
 
 
 # ---------- Bookmark (Many-to-Many User <-> Task) ----------
@@ -182,16 +203,16 @@ def remove_bookmark(db: Session, *, user_id: int, task_id: int) -> None:
 def list_bookmarked(
     db: Session, user_id: int, pagination: PageParams
 ) -> tuple[list[Task], int]:
-    total = db.scalar(
+    total = db.execute(
         select(func.count()).select_from(task_bookmarks).where(task_bookmarks.c.user_id == user_id)
-    )
+    ).scalar_one()
     stmt = (
         select(Task)
         .join(task_bookmarks, task_bookmarks.c.task_id == Task.id)
         .where(task_bookmarks.c.user_id == user_id)
         .options(*TASK_LOAD_OPTIONS)
         .order_by(task_bookmarks.c.created_at.desc(), Task.id.desc())
-        .offset(pagination.skip)
+        .offset(pagination.offset)
         .limit(pagination.limit)
     )
     return list(db.scalars(stmt).all()), total

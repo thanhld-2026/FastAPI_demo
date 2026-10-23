@@ -10,7 +10,7 @@ from app.core.responses import error_responses
 from app.dependencies import DbSession, TagDep, verify_admin_role
 from app.schemas.tag import TagCreate, TagOut
 
-router = APIRouter(prefix="/api/tags", tags=["Tags"])
+router = APIRouter(prefix="/tags", tags=["Tags"])
 
 TAGS_CACHE_KEY = "taskhub:tags:all"
 

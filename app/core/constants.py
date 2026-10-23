@@ -4,6 +4,11 @@ Khai báo 1 chỗ để không bị lệch: sửa String(...) ở model mà quê
 thì input hợp lệ vẫn có thể bị DB từ chối.
 """
 
+# --- API ---
+# Thay đổi không tương thích ngược sau này thì thêm /api/v2 chạy song song với v1.
+# (URL cũ không có version `/api/...` đã bỏ hẳn, gọi vào trả 404.)
+API_V1_PREFIX = "/api/v1"
+
 # --- User ---
 USERNAME_MIN_LENGTH = 3
 USERNAME_MAX_LENGTH = 50
@@ -37,3 +42,6 @@ REQUEST_ID_PATTERN = r"[A-Za-z0-9._-]{1,64}"
 # --- Pagination ---
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
+# Chặn page quá lớn: offset = (page - 1) * limit vượt kiểu số nguyên của DB -> 500,
+# và OFFSET rất lớn bắt DB duyệt qua hàng triệu dòng chỉ để bỏ đi
+MAX_PAGE = 10_000

@@ -22,7 +22,7 @@ from app.schemas.common import Page
 from app.schemas.task import ActivityOut, BookmarkOut, TaskAssign, TaskOut, TaskUpdate
 from app.services import tasks as task_service
 
-router = APIRouter(prefix="/api/tasks", tags=["Tasks"])
+router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
 
 @router.get("", response_model=Page[TaskOut], summary="Tìm kiếm / lọc / phân trang task")
@@ -61,7 +61,7 @@ def get_task(task: TaskDep):
     "/{task_id}",
     response_model=TaskOut,
     summary="Cập nhật task (người tạo / người được assign / PM / Admin)",
-    responses=error_responses(400, 401, 403, 404),
+    responses=error_responses(400, 401, 403, 404, 409),
 )
 def update_task(data: TaskUpdate, task: EditableTask, current_user: CurrentUser, db: DbSession):
     tags = get_tags_by_ids(db, data.tag_ids) if data.tag_ids is not None else None
@@ -72,7 +72,7 @@ def update_task(data: TaskUpdate, task: EditableTask, current_user: CurrentUser,
     "/{task_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Xóa task (người tạo / PM / Admin)",
-    responses=error_responses(401, 403, 404),
+    responses=error_responses(401, 403, 404, 409),
 )
 def delete_task(task: DeletableTask, db: DbSession):
     crud.task.delete(db, task)
@@ -82,7 +82,7 @@ def delete_task(task: DeletableTask, db: DbSession):
     "/{task_id}/assign",
     response_model=TaskOut,
     summary="[PM/Admin] Giao task cho user",
-    responses=error_responses(400, 401, 403, 404),
+    responses=error_responses(400, 401, 403, 404, 409),
 )
 def assign_task(data: TaskAssign, task: AssignableTask, current_user: CurrentUser, db: DbSession):
     return task_service.assign_task(
@@ -96,7 +96,9 @@ def assign_task(data: TaskAssign, task: AssignableTask, current_user: CurrentUse
     summary="Bookmark task (cần đăng nhập)",
     responses=error_responses(401, 403, 404),
 )
-def bookmark_task(task_id: ExistingTaskId, current_user: CurrentUser, db: DbSession):
+def bookmark_task(current_user: CurrentUser, task_id: ExistingTaskId, db: DbSession):
+    """Được cả khi project đã archive: bookmark là dữ liệu cá nhân, không sửa gì trong project.
+    `current_user` khai báo trước để chưa đăng nhập luôn nhận 401, kể cả với task không tồn tại."""
     crud.task.add_bookmark(db, user_id=current_user.id, task_id=task_id)
     return BookmarkOut(task_id=task_id, bookmarked=True)
 
@@ -107,7 +109,7 @@ def bookmark_task(task_id: ExistingTaskId, current_user: CurrentUser, db: DbSess
     summary="Bỏ bookmark task (idempotent)",
     responses=error_responses(401, 403, 404),
 )
-def unbookmark_task(task_id: ExistingTaskId, current_user: CurrentUser, db: DbSession):
+def unbookmark_task(current_user: CurrentUser, task_id: ExistingTaskId, db: DbSession):
     """Cố ý idempotent, giống POST /bookmark: gọi lại nhiều lần hoặc task chưa từng được
     bookmark vẫn trả 200 `bookmarked: false`, vì trạng thái cuối cùng là như nhau."""
     crud.task.remove_bookmark(db, user_id=current_user.id, task_id=task_id)
