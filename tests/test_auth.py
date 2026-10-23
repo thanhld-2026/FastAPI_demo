@@ -1,10 +1,12 @@
 """Mục 4 & 5: Đăng ký / đăng nhập JWT, bảo vệ endpoint, phân quyền admin."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
+import jwt
 from sqlalchemy import update
 
 from app import crud
+from app.config import settings
 from app.models import User
 from app.security import create_access_token
 from tests.conftest import DEFAULT_PASSWORD
@@ -109,6 +111,23 @@ def test_me_requires_valid_token(client, make_user):
     assert expired_token.status_code == 401
     assert ok.status_code == 200
     assert ok.json()["full_name"] == "alice"
+
+
+def test_only_access_tokens_are_accepted(client, make_user):
+    """JWT khác ký cùng SECRET_KEY (vd token đặt lại mật khẩu sau này) không dùng thay access
+    token được: thiếu claim `type` hoặc `type` khác "access" -> 401."""
+    alice = make_user("alice")
+    now = datetime.now(UTC)
+    base = {"sub": str(alice["id"]), "iat": now, "exp": now + timedelta(minutes=5)}
+
+    def call(payload: dict) -> int:
+        token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+        headers = {"Authorization": f"Bearer {token}"}
+        return client.get("/api/v1/users/me", headers=headers).status_code
+
+    assert call({**base, "type": "access"}) == 200
+    assert call({**base, "type": "reset_password"}) == 401
+    assert call(base) == 401  # token cũ chưa có `type`
 
 
 def test_me_works_with_legacy_email_stored_in_db(client, db, make_user):

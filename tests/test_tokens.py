@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+import jwt
 from sqlalchemy import func, select, update
 
 from app import crud
@@ -28,10 +29,13 @@ def test_login_returns_access_and_refresh_token(client, make_user):
     )
 
     body = resp.json()
+    claims = jwt.decode(body["access_token"], options={"verify_signature": False})
     assert resp.status_code == 200
     assert body["token_type"] == "bearer"
     assert body["access_token"] and body["refresh_token"]
     assert body["expires_in"] == settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    # expires_in khớp đúng thời hạn ghi trong token (cùng 1 nguồn)
+    assert claims["exp"] - claims["iat"] == body["expires_in"]
 
 
 def test_refresh_token_is_stored_hashed(client, db, make_user):
