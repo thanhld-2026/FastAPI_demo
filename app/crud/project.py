@@ -15,8 +15,11 @@ def lock_status(db: Session, project_id: int) -> ProjectStatus | None:
     """Đọc status của project, khóa chia sẻ dòng project (SELECT ... FOR SHARE) tới hết
     transaction: các request ghi task / comment cùng giữ được, nhưng archive (UPDATE dòng project)
     phải chờ chúng commit; request đến sau archive thì chờ archive commit rồi đọc được status mới
-    -> không ghi lọt vào project đã archive. Request sửa / xóa chính dòng project dùng
-    get_for_update. Trả về None nếu project không còn. (SQLite bỏ qua mệnh đề khóa.)
+    -> không ghi lọt vào project đã archive.
+
+    Request sửa / xóa chính dòng project dùng get_for_update (FOR UPDATE): nếu 2 request cùng giữ
+    FOR SHARE rồi cùng UPDATE dòng đó thì sẽ deadlock. Trả về None nếu project không còn.
+    (SQLite không hỗ trợ, SQLAlchemy tự bỏ qua mệnh đề này.)
     """
     stmt = select(Project.status).where(Project.id == project_id).with_for_update(read=True)
     return db.scalar(stmt)

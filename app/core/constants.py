@@ -5,7 +5,8 @@ thì input hợp lệ vẫn có thể bị DB từ chối.
 """
 
 # --- API ---
-# Đổi API theo kiểu không tương thích ngược thì thêm /api/v2, client cũ vẫn dùng được v1
+# Thay đổi không tương thích ngược sau này thì thêm /api/v2 chạy song song với v1.
+# (URL cũ không có version `/api/...` đã bỏ hẳn, gọi vào trả 404.)
 API_V1_PREFIX = "/api/v1"
 
 # --- User ---

@@ -106,7 +106,8 @@ def assign_task(data: TaskAssign, task: AssignableTask, current_user: CurrentUse
     summary="Bookmark task (thành viên workspace)",
     responses=error_responses(401, 403, 404),
 )
-def bookmark_task(task_id: ReadableTaskId, current_user: CurrentUser, db: DbSession):
+def bookmark_task(current_user: CurrentUser, task_id: ReadableTaskId, db: DbSession):
+    """Được cả khi project đã archive: bookmark là dữ liệu cá nhân, không sửa gì trong project."""
     crud.task.add_bookmark(db, user_id=current_user.id, task_id=task_id)
     return BookmarkOut(task_id=task_id, bookmarked=True)
 
@@ -117,7 +118,7 @@ def bookmark_task(task_id: ReadableTaskId, current_user: CurrentUser, db: DbSess
     summary="Bỏ bookmark task (idempotent)",
     responses=error_responses(401, 403, 404),
 )
-def unbookmark_task(task_id: ReadableTaskId, current_user: CurrentUser, db: DbSession):
+def unbookmark_task(current_user: CurrentUser, task_id: ReadableTaskId, db: DbSession):
     """Cố ý idempotent, giống POST /bookmark: gọi lại nhiều lần hoặc task chưa từng được
     bookmark vẫn trả 200 `bookmarked: false`, vì trạng thái cuối cùng là như nhau."""
     crud.task.remove_bookmark(db, user_id=current_user.id, task_id=task_id)

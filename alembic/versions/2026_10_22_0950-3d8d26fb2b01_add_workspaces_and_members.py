@@ -11,7 +11,7 @@ và thêm cột NOT NULL vào bảng đã có dữ liệu -> lỗi). Các bướ
 4. projects.workspace_id thành NOT NULL + FK.
 
 Revision ID: 3d8d26fb2b01
-Revises: 50f3714e5988
+Revises: 6e7c27a183ff
 Create Date: 2026-10-22 09:50:12.418532
 
 """
@@ -23,7 +23,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '3d8d26fb2b01'
-down_revision: Union[str, Sequence[str], None] = '50f3714e5988'
+down_revision: Union[str, Sequence[str], None] = '6e7c27a183ff'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
