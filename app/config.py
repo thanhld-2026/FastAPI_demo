@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     LABELS_CACHE_TTL: int = Field(
         default=300, ge=1, validation_alias=AliasChoices("LABELS_CACHE_TTL", "TAGS_CACHE_TTL")
     )
+    # Danh sách task đổi thường xuyên hơn label nên TTL ngắn hơn
+    # (TTL là lưới an toàn nếu lỡ sót 1 chỗ invalidate)
+    TASKS_CACHE_TTL: int = Field(default=60, ge=1)  # giây
     REDIS_SOCKET_TIMEOUT: float = 1.0  # giây; Redis chết -> fail nhanh, không treo request
 
     # --- Email ---

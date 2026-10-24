@@ -41,3 +41,8 @@ __all__ = [
     "task_bookmarks",
     "task_labels",
 ]
+
+# Đăng ký event của SQLAlchemy Session tự làm mới cache danh sách task (services/task_cache.py).
+# Đặt ở đây (không phải ở service) để MỌI process dùng model đều có: API, script, worker...
+# Import cuối file: các model ở trên đã khai báo xong nên không bị import vòng.
+from app.services import task_cache as _task_cache  # noqa: F401

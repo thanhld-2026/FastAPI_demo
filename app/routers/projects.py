@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Response, status
 from pydantic import PositiveInt
 
 from app import crud
@@ -22,6 +22,7 @@ from app.schemas.common import Page
 from app.schemas.project import ProjectDetail, ProjectOut, ProjectUpdate
 from app.schemas.task import TaskCreate, TaskOut
 from app.services import labels as label_service
+from app.services import tasks as task_service
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 
@@ -109,27 +110,37 @@ def unarchive_project(project: ManagedProject, db: DbSession):
 @router.get(
     "/{project_id}/tasks",
     response_model=Page[TaskOut],
-    summary="Danh sách task của project (lọc + phân trang)",
+    summary="Danh sách task của project (lọc + phân trang, có cache Redis, header X-Cache)",
     responses=error_responses(401, 403, 404),
 )
 def list_project_tasks(
-    current_user: CurrentUser,
     project: ReadableProject,
     db: DbSession,
     pagination: Pagination,
     # alias="status": trên URL vẫn là ?status=..., đặt tên biến khác để không đè module `status`
     task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
     priority: TaskPriority | None = None,
+    assignee_id: PositiveInt | None = None,
 ):
-    items, total = crud.task.list_tasks(
+    """Cache theo từng tổ hợp filter + trang; task / label của project đổi thì cache tự làm mới
+    (services/task_cache.py). Kiểm tra quyền (ReadableProject) chạy TRƯỚC khi đọc cache.
+
+    Trả thẳng chuỗi JSON (đã đúng dạng Page[TaskOut]) bằng Response: FastAPI không validate /
+    serialize lại; response_model vẫn dùng để document trên Swagger.
+    """
+    page_json, from_cache = task_service.list_project_tasks(
         db,
-        viewer=None,  # ReadableProject đã kiểm tra quyền đọc project này
-        project_id=project.id,
+        project.id,
+        pagination=pagination,
         status=task_status,
         priority=priority,
-        pagination=pagination,
+        assignee_id=assignee_id,
     )
-    return Page.build(items, total, pagination)
+    return Response(
+        content=page_json,
+        media_type="application/json",
+        headers={"X-Cache": "HIT" if from_cache else "MISS"},
+    )
 
 
 @router.post(

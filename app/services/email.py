@@ -42,11 +42,17 @@ def send_email(to: str, subject: str, body: str) -> None:
         logger.exception("Failed to send email to=%s subject=%r", to, subject)
 
 
+def _header_text(value: str) -> str:
+    """Gộp mọi khoảng trắng (kể cả xuống dòng) thành 1 dấu cách trước khi đưa vào header email.
+    Input mới đã bị chặn xuống dòng ở schema, đây là lớp bảo vệ cho dữ liệu cũ trong DB."""
+    return " ".join(value.split())
+
+
 def notify_new_comment(
     recipients: list[str], *, task_id: int, task_title: str, commenter: str, content: str
 ) -> None:
     """Báo cho người tạo task và người được assign khi có comment mới."""
-    subject = f"[TaskHub] {commenter} commented on task #{task_id}: {task_title}"
+    subject = _header_text(f"[TaskHub] {commenter} commented on task #{task_id}: {task_title}")
     body = (
         f"{commenter} vừa bình luận vào task #{task_id} \"{task_title}\":\n\n"
         f"{content}\n\n"
@@ -54,3 +60,25 @@ def notify_new_comment(
     )
     for recipient in recipients:
         send_email(recipient, subject, body)
+
+
+def notify_task_assigned(
+    recipient: str,
+    *,
+    task_id: int,
+    task_title: str,
+    project_name: str,
+    priority: str,
+    due_date: str | None,
+    assigner: str,
+) -> None:
+    """Báo cho người vừa được giao task (phụ lục feature 10)."""
+    subject = _header_text(f"[TaskHub] {assigner} assigned you task #{task_id}: {task_title}")
+    body = (
+        f"{assigner} vừa giao cho bạn task #{task_id} \"{task_title}\".\n\n"
+        f"Project: {project_name}\n"
+        f"Priority: {priority}\n"
+        f"Due date: {due_date or '-'}\n\n"
+        f"-- TaskHub"
+    )
+    send_email(recipient, subject, body)
