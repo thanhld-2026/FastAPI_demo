@@ -9,7 +9,7 @@ RESTful API quản lý **project** và **task** (giống Jira/Trello thu nhỏ),
 | Database | PostgreSQL 17 (driver psycopg 3) |
 | Validate dữ liệu | Pydantic v2, pydantic-settings, python-dotenv |
 | Xác thực | OAuth2 Password Flow, JWT access token + refresh token (rotation, thu hồi được), bcrypt |
-| Cache | Redis (danh sách label của từng project, cache-aside + TTL) |
+| Cache | Redis (danh sách task và danh sách label của từng project, cache-aside có version + TTL) |
 | Email (dev) | Mailpit (SMTP giả lập, có giao diện web) |
 | Test | pytest + TestClient + SQLite in-memory + fakeredis |
 | Triển khai | Docker + docker-compose |
@@ -29,7 +29,7 @@ docker compose exec app python -m scripts.seed    # tạo dữ liệu mẫu
 | <http://localhost:8000/docs> | Swagger UI: thử API trực tiếp |
 | <http://localhost:8000/redoc> | Tài liệu API dạng đọc |
 | <http://localhost:8000/health> | Kiểm tra app và kết nối DB |
-| <http://localhost:8025> | Mailpit: xem email thông báo comment |
+| <http://localhost:8025> | Mailpit: xem email thông báo (comment mới, được giao task) |
 
 Container `app` tự chạy `alembic upgrade head` trước khi khởi động server.
 
@@ -82,7 +82,7 @@ Phiên đăng nhập gồm 2 token:
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 140 test (+9 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 161 test (+9 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 # Test khóa dòng (FOR SHARE / FOR UPDATE) cần PostgreSQL thật, DB rỗng dành riêng cho test:
 # (test xóa / tạo lại toàn bộ bảng nên tên DB bắt buộc kết thúc bằng _test, nếu không test dừng ngay)
@@ -169,6 +169,13 @@ Quy ước:
   cho từng task đang dùng nó.
   Danh sách label được cache Redis theo project, có version: thêm / sửa / xóa label (hoặc xóa
   project) thì tăng version của project đó, cache cũ không bao giờ được đọc lại.
+- `GET /projects/{id}/tasks` được cache Redis theo project + từng tổ hợp filter / trang (TTL
+  `TASKS_CACHE_TTL`, mặc định 60 giây, header `X-Cache`). Cache tự làm mới sau mỗi commit làm đổi
+  danh sách task của project (tạo / sửa / xóa / assign task, gắn / gỡ label, sửa / xóa label, user
+  đổi tên, thành viên rời workspace...) nhờ event của SQLAlchemy Session (`app/services/task_cache.py`);
+  comment / bookmark không làm mới. Kiểm tra quyền chạy trước khi đọc cache.
+- Được giao task (assign) thì người được giao nhận email (chạy ngầm). Không gửi khi tự giao cho
+  mình, giao lại đúng người đang làm hoặc bỏ assign.
 - Project: `ACTIVE` / `ARCHIVED`. Chỉ project `ACTIVE` mới ghi được: project đã archive thì chính
   project, task, comment và label bên trong chỉ đọc được (mọi thao tác ghi, kể cả sửa / xóa project,
   trả `409`), OWNER / Admin unarchive để mở lại. Ngoại lệ có chủ đích: bookmark (dữ liệu cá nhân).
@@ -199,13 +206,13 @@ Quy ước:
 | GET | `/api/v1/projects/{project_id}` | VIEWER (kèm tasks lồng nhau) | 2, 3 |
 | PUT / DELETE | `/api/v1/projects/{project_id}` | OWNER | 5, PL 4 |
 | POST | `/api/v1/projects/{project_id}/archive`, `.../unarchive` | OWNER (idempotent) | PL 4 |
-| GET | `/api/v1/projects/{project_id}/tasks` | VIEWER (lọc + phân trang) | 3, 5 |
+| GET | `/api/v1/projects/{project_id}/tasks?status=&priority=&assignee_id=` | VIEWER (lọc + phân trang, cache Redis, header `X-Cache`) | 3, 5, PL 8, 9 |
 | POST | `/api/v1/projects/{project_id}/tasks` | EDITOR | 3 |
 | GET | `/api/v1/tasks?status=&priority=&project_id=&assignee_id=&q=` | Task trong workspace của tôi (lọc + phân trang) | 5 |
 | GET | `/api/v1/tasks/{task_id}` | VIEWER | 3 |
 | PUT | `/api/v1/tasks/{task_id}` | EDITOR | 6 |
 | DELETE | `/api/v1/tasks/{task_id}` | Người tạo (EDITOR) / OWNER | 6 |
-| POST | `/api/v1/tasks/{task_id}/assign` | EDITOR | 6 |
+| POST | `/api/v1/tasks/{task_id}/assign` | EDITOR (người được giao nhận email ngầm) | 6, PL 10 |
 | POST / DELETE | `/api/v1/tasks/{task_id}/bookmark` | VIEWER | 5 |
 | GET | `/api/v1/tasks/{task_id}/activities` | VIEWER (phân trang) | 6 |
 | GET / POST | `/api/v1/tasks/{task_id}/comments` | GET: VIEWER (phân trang), POST: EDITOR (gửi email ngầm) | 6, 7 |

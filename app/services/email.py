@@ -54,3 +54,25 @@ def notify_new_comment(
     )
     for recipient in recipients:
         send_email(recipient, subject, body)
+
+
+def notify_task_assigned(
+    recipient: str,
+    *,
+    task_id: int,
+    task_title: str,
+    project_name: str,
+    priority: str,
+    due_date: str | None,
+    assigner: str,
+) -> None:
+    """Báo cho người vừa được giao task (phụ lục feature 10)."""
+    subject = f"[TaskHub] {assigner} assigned you task #{task_id}: {task_title}"
+    body = (
+        f"{assigner} vừa giao cho bạn task #{task_id} \"{task_title}\".\n\n"
+        f"Project: {project_name}\n"
+        f"Priority: {priority}\n"
+        f"Due date: {due_date or '-'}\n\n"
+        f"-- TaskHub"
+    )
+    send_email(recipient, subject, body)

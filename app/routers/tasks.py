@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, BackgroundTasks, Query, status
 from pydantic import PositiveInt
 
 from app import crud
@@ -96,9 +96,20 @@ def delete_task(task: DeletableTask, db: DbSession):
     summary="[EDITOR] Giao task cho thành viên (role EDITOR trở lên)",
     responses=error_responses(400, 401, 403, 404, 409),
 )
-def assign_task(data: TaskAssign, task: AssignableTask, current_user: CurrentUser, db: DbSession):
+def assign_task(
+    data: TaskAssign,
+    task: AssignableTask,
+    current_user: CurrentUser,
+    db: DbSession,
+    background_tasks: BackgroundTasks,
+):
+    """Người mới được giao nhận email thông báo (gửi ngầm sau khi trả response)."""
     return task_service.assign_task(
-        db, task=task, assignee_id=data.assignee_id, actor=current_user
+        db,
+        task=task,
+        assignee_id=data.assignee_id,
+        actor=current_user,
+        background_tasks=background_tasks,
     )
 
 
