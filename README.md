@@ -82,7 +82,7 @@ Phiên đăng nhập gồm 2 token:
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 161 test (+9 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 173 test (+9 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 # Test khóa dòng (FOR SHARE / FOR UPDATE) cần PostgreSQL thật, DB rỗng dành riêng cho test:
 # (test xóa / tạo lại toàn bộ bảng nên tên DB bắt buộc kết thúc bằng _test, nếu không test dừng ngay)
@@ -172,10 +172,14 @@ Quy ước:
 - `GET /projects/{id}/tasks` được cache Redis theo project + từng tổ hợp filter / trang (TTL
   `TASKS_CACHE_TTL`, mặc định 60 giây, header `X-Cache`). Cache tự làm mới sau mỗi commit làm đổi
   danh sách task của project (tạo / sửa / xóa / assign task, gắn / gỡ label, sửa / xóa label, user
-  đổi tên, thành viên rời workspace...) nhờ event của SQLAlchemy Session (`app/services/task_cache.py`);
-  comment / bookmark không làm mới. Kiểm tra quyền chạy trước khi đọc cache.
+  đổi tên, thành viên rời workspace...) nhờ event của SQLAlchemy Session (`app/services/task_cache.py`,
+  đăng ký khi import `app.models`); comment / bookmark không làm mới. Kiểm tra quyền chạy trước khi
+  đọc cache. Lưu sẵn chuỗi JSON (HIT trả thẳng), không cache trang rỗng, key có fingerprint của schema
+  response (đổi `TaskOut` thì tự dùng key mới). Thay đổi ngoài Session (SQL chạy thẳng, cascade
+  trong DB) thì chờ hết TTL.
 - Được giao task (assign) thì người được giao nhận email (chạy ngầm). Không gửi khi tự giao cho
-  mình, giao lại đúng người đang làm hoặc bỏ assign.
+  mình, giao lại đúng người đang làm hoặc bỏ assign. `title` và `full_name` không được chứa ký tự
+  xuống dòng (nằm trong tiêu đề email).
 - Project: `ACTIVE` / `ARCHIVED`. Chỉ project `ACTIVE` mới ghi được: project đã archive thì chính
   project, task, comment và label bên trong chỉ đọc được (mọi thao tác ghi, kể cả sửa / xóa project,
   trả `409`), OWNER / Admin unarchive để mở lại. Ngoại lệ có chủ đích: bookmark (dữ liệu cá nhân).

@@ -58,3 +58,4 @@ SKIP_PARAM_REMOVED = (
 PASSWORD_TOO_LONG = "Password is too long (max {max_bytes} bytes)"
 DUE_DATE_IN_PAST = "due_date cannot be in the past"
 TITLE_MUST_BE_SINGLE_LINE = "title must not contain line breaks"
+FULL_NAME_MUST_BE_SINGLE_LINE = "full_name must not contain line breaks"

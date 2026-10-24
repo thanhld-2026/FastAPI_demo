@@ -1,6 +1,6 @@
 """Nghiệp vụ của task, nằm giữa router và crud: router chỉ nhận request / trả response."""
 
-from typing import Any
+from functools import partial
 
 from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
@@ -23,12 +23,13 @@ def list_project_tasks(
     status: TaskStatus | None,
     priority: TaskPriority | None,
     assignee_id: int | None,
-) -> tuple[dict[str, Any], bool]:
+) -> tuple[str, bool]:
     """Danh sách task của 1 project (đã lọc + phân trang), có cache Redis.
-    Trả về (trang dữ liệu dạng JSON, có lấy từ cache không).
+    Trả về (chuỗi JSON của response, có lấy từ cache không).
 
     Gọi SAU khi đã kiểm tra quyền đọc project: cache dùng chung cho mọi thành viên (TaskOut không
     có field riêng của từng người xem), không được làm lộ dữ liệu cho người ngoài.
+    Cache sẵn chuỗi JSON: lúc HIT trả thẳng, không phải dựng lại model rồi serialize lần nữa.
     """
     version = task_cache.current_version(project_id)
     key = None
@@ -42,7 +43,7 @@ def list_project_tasks(
             page=pagination.page,
             limit=pagination.limit,
         )
-        cached = task_cache.get(key)
+        cached = task_cache.get_page(key)
         if cached is not None:
             return cached, True
     items, total = crud.task.list_tasks(
@@ -54,10 +55,13 @@ def list_project_tasks(
         assignee_id=assignee_id,
         pagination=pagination,
     )
-    page = Page[TaskOut].build(items, total, pagination).model_dump(mode="json")
-    if key is not None:
-        task_cache.put(key, page)
-    return page, False
+    page_json = Page[TaskOut].build(items, total, pagination).model_dump_json()
+    # Không cache trang rỗng: assignee_id / page tùy ý (vd user không thuộc workspace, trang
+    # vượt quá) sẽ tạo vô số key không bao giờ được đọc lại, chiếm bộ nhớ Redis.
+    # Trang rỗng thì đọc DB cũng rất rẻ.
+    if key is not None and items:
+        task_cache.put_page(key, page_json)
+    return page_json, False
 
 
 def assign_task(
@@ -83,20 +87,23 @@ def assign_task(
         role = crud.workspace.get_role_for_project(db, task.project_id, assignee_id, lock=True)
         if assignee is None or not assignee.is_active or not permissions.can_be_assigned(role):
             raise BadRequestException(messages.ASSIGNEE_NOT_EDITOR)
-    newly_assigned = assignee is not None and assignee.id != task.assignee_id
-    updated = crud.task.assign(db, task=task, assignee=assignee, actor=actor)
-    if newly_assigned and assignee is not None and assignee.id != actor.id:
-        # Chỉ truyền dữ liệu thuần: khi email được gửi thì session của request đã đóng
-        background_tasks.add_task(
+    notify = None
+    if assignee is not None and assignee.id not in (task.assignee_id, actor.id):
+        # Lấy dữ liệu thuần TRƯỚC khi commit (sau commit các object bị expire, đọc lại tốn query);
+        # background task chỉ nhận dữ liệu thuần vì lúc chạy session của request đã đóng
+        notify = partial(
             email_service.notify_task_assigned,
             assignee.email,
-            task_id=updated.id,
-            task_title=updated.title,
-            project_name=updated.project.name,
-            priority=updated.priority.value,
-            due_date=updated.due_date.isoformat() if updated.due_date else None,
+            task_id=task.id,
+            task_title=task.title,
+            project_name=task.project.name,
+            priority=task.priority.value,
+            due_date=task.due_date.isoformat() if task.due_date else None,
             assigner=actor.full_name,
         )
+    updated = crud.task.assign(db, task=task, assignee=assignee, actor=actor)
+    if notify is not None:  # chỉ tới đây khi assign đã commit thành công
+        background_tasks.add_task(notify)
     return updated
 
 

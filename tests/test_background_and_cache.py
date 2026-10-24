@@ -2,15 +2,21 @@
 label và danh sách task của project."""
 
 import logging
+import os
+import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import fakeredis
 import pytest
 import redis
+from pydantic import BaseModel
 
 from app import cache, crud
 from app.models import ActivityAction, Comment, Label, Task, TaskActivity, User
+from app.schemas.common import Page
+from app.schemas.task import TaskOut
 from app.services import email as email_service
 from app.services import labels as label_service
 from app.services import task_cache
@@ -289,23 +295,30 @@ class TaskCacheSetup:
     other_project: dict
     task: dict
     label: dict
+    other_label: dict
 
     def url(self, project: dict | None = None) -> str:
         return f"/api/v1/projects/{(project or self.project)['id']}/tasks"
 
 
 @pytest.fixture
-def task_cache_setup(make_user, make_project, make_task, make_label, add_member) -> TaskCacheSetup:
-    """2 project cùng 1 workspace; dev (EDITOR) đang làm 1 task có label `bug`."""
+def task_cache_setup(
+    client, make_user, make_project, make_task, make_label, add_member
+) -> TaskCacheSetup:
+    """2 project cùng 1 workspace; dev (EDITOR) tạo và đang được giao 1 task có label `bug`,
+    project còn label `docs` chưa gắn vào đâu."""
     owner = make_user("owner")
     dev = make_user("dev")
     project = make_project(owner)
     other_project = make_project(owner, name="Other", workspace={"id": project["workspace_id"]})
     add_member(project, owner, dev)
     label = make_label(project, owner, "bug")
+    other_label = make_label(project, owner, "docs")
     task = make_task(project["id"], dev, title="Login API", label_ids=[label["id"]])
     make_task(other_project["id"], owner, title="Other task")
-    return TaskCacheSetup(owner, dev, project, other_project, task, label)
+    setup = TaskCacheSetup(owner, dev, project, other_project, task, label, other_label)
+    _assign(client, task, dev, by=owner)
+    return setup
 
 
 def test_project_tasks_are_cached_per_filter_and_page(client, task_cache_setup, fake_redis):
@@ -314,20 +327,35 @@ def test_project_tasks_are_cached_per_filter_and_page(client, task_cache_setup, 
 
     first = client.get(s.url(), headers=headers)
     second = client.get(s.url(), headers=headers)
-    filtered = client.get(s.url(), params={"status": "DONE"}, headers=headers)
-    page_2 = client.get(s.url(), params={"page": 2, "limit": 1}, headers=headers)
+    todo = [client.get(s.url(), params={"status": "TODO"}, headers=headers) for _ in range(2)]
 
-    assert [r.headers["X-Cache"] for r in (first, second, filtered, page_2)] == [
+    assert [r.headers["X-Cache"] for r in (first, second, *todo)] == [
         "MISS",
         "HIT",
         "MISS",  # mỗi tổ hợp filter / trang là 1 key riêng
-        "MISS",
+        "HIT",
     ]
-    assert second.json() == first.json()
+    # HIT trả nguyên chuỗi JSON đã lưu: giống hệt từng byte lần MISS
+    assert second.content == first.content
+    assert second.headers["content-type"] == "application/json"
     assert [t["title"] for t in second.json()["items"]] == ["Login API"]
-    assert filtered.json()["items"] == []
     data_keys = fake_redis.keys(f"taskhub:projects:{s.project['id']}:tasks:v[0-9]*")
-    assert len(data_keys) == 3 and all(fake_redis.ttl(key) > 0 for key in data_keys)
+    assert len(data_keys) == 2 and all(fake_redis.ttl(key) > 0 for key in data_keys)
+
+
+def test_empty_task_pages_are_not_cached(client, make_user, task_cache_setup, fake_redis):
+    """assignee_id / page tùy ý không được tạo ra vô số key rỗng trong Redis."""
+    s = task_cache_setup
+    outsider = make_user("outsider")
+    headers = s.owner["headers"]
+    queries = [{"status": "DONE"}, {"page": 99}, {"assignee_id": outsider["id"]}]
+
+    for params in queries:
+        for _ in range(2):
+            resp = client.get(s.url(), params=params, headers=headers)
+            assert (resp.json()["items"], resp.headers["X-Cache"]) == ([], "MISS")
+
+    assert fake_redis.keys(f"taskhub:projects:{s.project['id']}:tasks:v[0-9]*") == []
 
 
 def test_project_tasks_can_be_filtered_by_assignee(client, task_cache_setup):
@@ -357,7 +385,13 @@ CHANGES: list = [
         lambda c, s: c.delete(f"/api/v1/tasks/{s.task['id']}", headers=s.owner["headers"]),
         id="delete-task",
     ),
-    pytest.param(lambda c, s: _assign(c, s.task, s.dev, by=s.owner), id="assign"),
+    pytest.param(lambda c, s: _assign(c, s.task, s.owner, by=s.owner), id="reassign"),
+    pytest.param(
+        lambda c, s: c.post(
+            f"/api/v1/tasks/{s.task['id']}/labels/{s.other_label['id']}", headers=s.owner["headers"]
+        ),
+        id="attach-label",
+    ),
     pytest.param(
         lambda c, s: c.delete(
             f"/api/v1/tasks/{s.task['id']}/labels/{s.label['id']}", headers=s.owner["headers"]
@@ -380,6 +414,15 @@ CHANGES: list = [
             "/api/v1/users/me", json={"full_name": "Dev Renamed"}, headers=s.dev["headers"]
         ),
         id="rename-creator",
+    ),
+    pytest.param(
+        # dev bị hạ xuống VIEWER -> task dev đang làm được bỏ assign
+        lambda c, s: c.patch(
+            f"/api/v1/workspaces/{s.project['workspace_id']}/members/{s.dev['id']}",
+            json={"role": "VIEWER"},
+            headers=s.owner["headers"],
+        ),
+        id="demote-assignee",
     ),
 ]
 
@@ -444,7 +487,7 @@ def test_failed_write_does_not_refresh_the_task_cache(
         raise RuntimeError("simulated failure while writing activity")
 
     monkeypatch.setattr(crud.activity, "add", broken_add)
-    failed = _assign(client, s.task, s.dev, by=s.owner)
+    failed = _assign(client, s.task, s.owner, by=s.owner)
 
     assert failed.status_code == 500
     assert client.get(s.url(), headers=headers).headers["X-Cache"] == "HIT"
@@ -512,3 +555,150 @@ def test_deleted_project_task_cache_expires(client, task_cache_setup, fake_redis
 
     # Version key của project đã xóa không nằm mãi trong Redis
     assert fake_redis.ttl(f"taskhub:projects:{s.project['id']}:tasks:version") > 0
+
+
+def test_task_expired_by_an_earlier_commit_still_refreshes_its_project(
+    db, task_cache_setup, fake_redis
+):
+    """Object đã commit 1 lần (mọi attribute hết hạn) rồi sửa tiếp: vẫn phải biết task thuộc
+    project nào, không được làm mới nhầm key `projects:None`."""
+    s = task_cache_setup
+    start = task_cache.current_version(s.project["id"])
+    task = db.get(Task, s.task["id"])
+    assert task is not None
+    db.commit()  # expire_on_commit: project_id cũng hết hạn
+
+    task.title = "Renamed after commit"
+    db.commit()
+
+    assert task_cache.current_version(s.project["id"]) == start + 1
+    assert fake_redis.keys("taskhub:projects:None:*") == []
+
+
+def test_bulk_update_through_the_session_refreshes_the_task_cache(
+    db, task_cache_setup, fake_redis
+):
+    """UPDATE hàng loạt (vd crud.task.touch) không đi qua unit of work: vẫn phải làm mới."""
+    s = task_cache_setup
+    start = task_cache.current_version(s.project["id"])
+
+    crud.task.touch(db, [s.task["id"]])
+    db.commit()
+
+    assert task_cache.current_version(s.project["id"]) == start + 1
+    assert task_cache.current_version(s.other_project["id"]) == 0  # project khác không bị đụng
+
+
+def test_all_versions_are_bumped_in_one_round_trip(
+    client, make_task, task_cache_setup, fake_redis, monkeypatch
+):
+    """Nhiều project cùng đổi (vd user đổi tên) -> 1 pipeline Redis, không phải 1 lệnh / project:
+    Redis chết thì chỉ chờ timeout 1 lần."""
+    s = task_cache_setup
+    make_task(s.project["id"], s.owner, title="Owner task")  # owner có task ở cả 2 project
+    project_ids = (s.project["id"], s.other_project["id"])
+    before = [task_cache.current_version(pid) for pid in project_ids]
+    pipelines = []
+    original = fake_redis.pipeline
+
+    def counting_pipeline(*args, **kwargs):
+        pipelines.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(fake_redis, "pipeline", counting_pipeline)
+    client.patch("/api/v1/users/me", json={"full_name": "Owner 2"}, headers=s.owner["headers"])
+
+    assert len(pipelines) == 1
+    assert [task_cache.current_version(pid) for pid in project_ids] == [v + 1 for v in before]
+
+
+def test_redis_down_waits_for_a_single_timeout(db, task_cache_setup, monkeypatch):
+    s = task_cache_setup
+    unreachable = redis.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.2)
+    monkeypatch.setattr(cache, "get_redis", lambda: unreachable)
+    calls = []
+    original = unreachable.pipeline
+    monkeypatch.setattr(
+        unreachable, "pipeline", lambda *a, **k: calls.append(1) or original(*a, **k)
+    )
+    owner = db.get(User, s.owner["id"])
+    assert owner is not None
+    for project_id in (s.project["id"], s.other_project["id"]):
+        task = Task(title=f"T{project_id}", project_id=project_id, creator=owner)
+        db.add(task)
+
+    db.commit()  # 2 project đổi, Redis không kết nối được: không lỗi, chỉ 1 lần thử
+
+    assert len(calls) == 1
+
+
+def test_cache_key_changes_with_the_response_schema():
+    """Đổi hình dạng response (thêm field...) -> fingerprint khác -> key khác: bản deploy mới
+    không đọc phải dữ liệu cache theo hình dạng cũ."""
+
+    class V1(BaseModel):
+        id: int
+
+    class V2(BaseModel):
+        id: int
+        title: str
+
+    fingerprint = cache.schema_fingerprint(Page[TaskOut])
+    key = task_cache.page_key(1, 0, status=None, priority=None, assignee_id=None, page=1, limit=20)
+
+    assert cache.schema_fingerprint(V1) != cache.schema_fingerprint(V2)
+    assert cache.schema_fingerprint(Page[TaskOut]) == fingerprint  # ổn định giữa các lần gọi
+    assert f":{fingerprint}:" in key
+
+
+def test_cache_events_are_registered_by_importing_models_only():
+    """Script / worker chỉ import model (không import service nào) vẫn có event làm mới cache."""
+    code = (
+        "import sys, app.models\n"
+        "from sqlalchemy import event\n"
+        "from sqlalchemy.orm import Session\n"
+        "tc = sys.modules['app.services.task_cache']\n"
+        "assert 'app.services.tasks' not in sys.modules\n"
+        "assert event.contains(Session, 'after_commit', tc._invalidate_after_commit)\n"
+    )
+    env = {**os.environ, "SECRET_KEY": "x" * 32, "DATABASE_URL": "sqlite://"}
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_no_change_tracking_when_redis_is_disabled(client, task_cache_setup, sql_log):
+    """Không cấu hình Redis: event không làm gì, đổi tên user không chạy thêm query tìm project."""
+    s = task_cache_setup
+
+    client.patch("/api/v1/users/me", json={"full_name": "Dev 2"}, headers=s.dev["headers"])
+
+    assert not any("DISTINCT tasks.project_id" in sql for sql in sql_log)
+
+
+def test_full_name_cannot_contain_line_breaks(client, make_user):
+    alice = make_user("alice")
+    bad = "Alice\nBcc: victim@example.com"
+
+    register = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": bad, "email": "x@example.com", "password": "Password123"},
+    )
+    update = client.patch("/api/v1/users/me", json={"full_name": bad}, headers=alice["headers"])
+
+    assert (register.status_code, update.status_code) == (422, 422)
+
+
+def test_email_subject_flattens_names_already_stored_with_line_breaks(sent_emails):
+    """Dữ liệu cũ trong DB có thể còn tên xuống dòng: tiêu đề email gộp lại thành 1 dòng."""
+    email_service.notify_task_assigned(
+        "dev@example.com",
+        task_id=1,
+        task_title="Login",
+        project_name="TaskHub",
+        priority="HIGH",
+        due_date=None,
+        assigner="Alice\nNguyen",
+    )
+
+    assert sent_emails[0]["subject"] == "[TaskHub] Alice Nguyen assigned you task #1: Login"

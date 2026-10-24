@@ -31,8 +31,19 @@ Password = Annotated[
     Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_BYTES),
     AfterValidator(_check_bcrypt_limit),
 ]
+
+
+def _single_line_name(value: str) -> str:
+    # Tên được đưa vào tiêu đề email (header): ký tự xuống dòng làm header không hợp lệ
+    if "\n" in value or "\r" in value:
+        raise ValueError(messages.FULL_NAME_MUST_BE_SINGLE_LINE)
+    return value
+
+
 FullName = Annotated[
-    str, Field(min_length=REQUIRED_TEXT_MIN_LENGTH, max_length=FULL_NAME_MAX_LENGTH)
+    str,
+    Field(min_length=REQUIRED_TEXT_MIN_LENGTH, max_length=FULL_NAME_MAX_LENGTH),
+    AfterValidator(_single_line_name),
 ]
 
 

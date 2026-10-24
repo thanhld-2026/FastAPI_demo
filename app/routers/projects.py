@@ -117,15 +117,18 @@ def list_project_tasks(
     project: ReadableProject,
     db: DbSession,
     pagination: Pagination,
-    response: Response,
     # alias="status": trên URL vẫn là ?status=..., đặt tên biến khác để không đè module `status`
     task_status: Annotated[TaskStatus | None, Query(alias="status")] = None,
     priority: TaskPriority | None = None,
     assignee_id: PositiveInt | None = None,
 ):
     """Cache theo từng tổ hợp filter + trang; task / label của project đổi thì cache tự làm mới
-    (services/task_cache.py). Kiểm tra quyền (ReadableProject) chạy TRƯỚC khi đọc cache."""
-    page, from_cache = task_service.list_project_tasks(
+    (services/task_cache.py). Kiểm tra quyền (ReadableProject) chạy TRƯỚC khi đọc cache.
+
+    Trả thẳng chuỗi JSON (đã đúng dạng Page[TaskOut]) bằng Response: FastAPI không validate /
+    serialize lại; response_model vẫn dùng để document trên Swagger.
+    """
+    page_json, from_cache = task_service.list_project_tasks(
         db,
         project.id,
         pagination=pagination,
@@ -133,8 +136,11 @@ def list_project_tasks(
         priority=priority,
         assignee_id=assignee_id,
     )
-    response.headers["X-Cache"] = "HIT" if from_cache else "MISS"
-    return page
+    return Response(
+        content=page_json,
+        media_type="application/json",
+        headers={"X-Cache": "HIT" if from_cache else "MISS"},
+    )
 
 
 @router.post(
