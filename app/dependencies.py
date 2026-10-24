@@ -12,6 +12,7 @@ load resource -> kiểm tra thành viên -> project còn ACTIVE (nếu là thao 
 """
 
 from collections.abc import Callable
+from functools import partial
 from typing import Annotated
 
 import jwt
@@ -33,9 +34,9 @@ from app.core.exceptions import (
 from app.database import get_db
 from app.models import (
     Comment,
+    Label,
     Project,
     ProjectStatus,
-    Tag,
     Task,
     User,
     Workspace,
@@ -72,17 +73,7 @@ def get_current_active_user(user: Annotated[User, Depends(get_current_user)]) ->
 CurrentUser = Annotated[User, Depends(get_current_active_user)]
 
 
-# ---------- Resource không thuộc workspace ----------
-def get_existing_tag(tag_id: int, db: DbSession) -> Tag:
-    tag = crud.tag.get(db, tag_id)
-    if tag is None:
-        raise NotFoundException(messages.TAG_NOT_FOUND)
-    return tag
-
-
-TagDep = Annotated[Tag, Depends(get_existing_tag)]
-
-
+# ---------- Admin hệ thống ----------
 def verify_admin_role(user: CurrentUser) -> User:
     if not permissions.is_admin(user):
         raise ForbiddenException(messages.ADMIN_REQUIRED)
@@ -110,16 +101,33 @@ def _require_role(user: User, role: WorkspaceRole | None, minimum: WorkspaceRole
 def _raise_if_not_writable(status: ProjectStatus | None, not_found_message: str) -> None:
     """Quy tắc "project đã archive thì project, task, comment bên trong chỉ đọc" chỉ nằm ở đây.
 
-    2 ngoại lệ có chủ đích (không đi qua hàm này, có test):
-    - Bookmark / bỏ bookmark: dữ liệu cá nhân của người xem, không sửa gì trong project.
-    - Admin xóa tag: tag dùng chung toàn hệ thống; chặn thì tag từng gắn vào project đã archive
-      sẽ không bao giờ xóa được. Task trong project archive mất tag đó (không ghi activity).
+    Ngoại lệ có chủ đích (không đi qua hàm này, có test): bookmark / bỏ bookmark, vì đó là dữ
+    liệu cá nhân của người xem, không sửa gì trong project. (Tag dùng chung trước đây cũng là
+    ngoại lệ; label thay tag thuộc từng project nên ghi label trong project archive là 409.)
     """
     if status is None:  # không tồn tại / vừa bị xóa bởi request khác
         raise NotFoundException(not_found_message)
     # Chỉ ACTIVE mới ghi được: thêm status mới (vd ON_HOLD) thì mặc định là chỉ đọc
     if status != ProjectStatus.ACTIVE:
         raise ConflictException(messages.PROJECT_ARCHIVED)
+
+
+def _authorize(
+    user: User,
+    role: WorkspaceRole | None,
+    minimum: WorkspaceRole,
+    not_found_message: str,
+    read_status: Callable[[], ProjectStatus | None] | None = None,
+) -> None:
+    """Thứ tự kiểm tra dùng chung cho project / task / label: 404 (không phải thành viên)
+    -> 409 (project đã archive, chỉ với thao tác ghi: có `read_status`) -> 403 (role không đủ).
+
+    read_status là hàm: chỉ đọc (và khóa) status project SAU khi biết user là thành viên.
+    """
+    _require_member(user, role, not_found_message)
+    if read_status is not None:
+        _raise_if_not_writable(read_status(), not_found_message)
+    _require_role(user, role, minimum)
 
 
 def _member_workspace(
@@ -184,20 +192,23 @@ def project_access(
     """
 
     def dependency(project_id: int, user: CurrentUser, db: DbSession) -> Project:
-        project = crud.project.get(db, project_id)
-        if project is None:
+        found = crud.project.get(db, project_id)
+        if found is None:
             raise NotFoundException(messages.PROJECT_NOT_FOUND)
-        role = crud.workspace.get_role(db, project.workspace_id, user.id)
-        _require_member(user, role, messages.PROJECT_NOT_FOUND)
-        if writable:
-            # lock=True: chưa khóa ở đây, chỉ kiểm tra sớm để 409 đứng trước 403
-            status = project.status if lock else crud.project.lock_status(db, project.id)
-            _raise_if_not_writable(status, messages.PROJECT_NOT_FOUND)
-        _require_role(user, role, minimum)
-        if lock:
-            project = _lock_project(db, project.id)
-            if writable:  # status có thể đã đổi trong lúc chờ khóa
-                _raise_if_not_writable(project.status, messages.PROJECT_NOT_FOUND)
+
+        def read_status() -> ProjectStatus | None:
+            # lock=True: chưa khóa ở bước này (khóa sau khi đủ quyền), chỉ để 409 đứng trước 403
+            return found.status if lock else crud.project.lock_status(db, found.id)
+
+        role = crud.workspace.get_role(db, found.workspace_id, user.id)
+        _authorize(
+            user, role, minimum, messages.PROJECT_NOT_FOUND, read_status if writable else None
+        )
+        if not lock:
+            return found
+        project = _lock_project(db, found.id)
+        if writable:  # status có thể đã đổi trong lúc chờ khóa
+            _raise_if_not_writable(project.status, messages.PROJECT_NOT_FOUND)
         return project
 
     return dependency
@@ -234,11 +245,8 @@ def task_access(
     def dependency(task_id: int, user: CurrentUser, db: DbSession) -> Task:
         # 1 query JOIN lấy role; None = task không tồn tại HOẶC không phải thành viên
         role = crud.workspace.get_role_for_task(db, task_id, user.id)
-        _require_member(user, role, messages.TASK_NOT_FOUND)
-        if writable:
-            status = crud.task.lock_project_status(db, task_id)
-            _raise_if_not_writable(status, messages.TASK_NOT_FOUND)
-        _require_role(user, role, minimum)
+        read_status = partial(crud.task.lock_project_status, db, task_id) if writable else None
+        _authorize(user, role, minimum, messages.TASK_NOT_FOUND, read_status)
         task = crud.task.get_for_update(db, task_id) if lock else crud.task.get(db, task_id)
         if task is None:  # admin xem task không tồn tại, hoặc task vừa bị xóa
             raise NotFoundException(messages.TASK_NOT_FOUND)
@@ -257,6 +265,36 @@ AssignableTask = Annotated[
 # EDITOR chỉ xóa task mình tạo; OWNER / admin xóa được mọi task
 DeletableTask = Annotated[
     Task, Depends(task_access(WorkspaceRole.EDITOR, writable=True, for_delete=True))
+]
+
+
+def label_access(
+    minimum: WorkspaceRole, *, writable: bool = False, lock: bool = False
+) -> Callable[..., Label]:
+    """Label trên URL + role tối thiểu trong workspace chứa project của label.
+
+    lock: sửa / xóa chính label -> FOR UPDATE + đọc lại sau khi kiểm tra quyền (như project).
+    """
+
+    def dependency(label_id: int, user: CurrentUser, db: DbSession) -> Label:
+        label = crud.label.get(db, label_id)
+        if label is None:
+            raise NotFoundException(messages.LABEL_NOT_FOUND)
+        role = crud.workspace.get_role_for_project(db, label.project_id, user.id)
+        read_status = partial(crud.project.lock_status, db, label.project_id) if writable else None
+        _authorize(user, role, minimum, messages.LABEL_NOT_FOUND, read_status)
+        if lock:
+            locked = crud.label.get_for_update(db, label.id)
+            if locked is None:  # vừa bị xóa bởi request khác
+                raise NotFoundException(messages.LABEL_NOT_FOUND)
+            label = locked
+        return label
+
+    return dependency
+
+
+EditableLabel = Annotated[
+    Label, Depends(label_access(WorkspaceRole.EDITOR, writable=True, lock=True))
 ]
 
 
@@ -321,10 +359,11 @@ Pagination = Annotated[PageParams, Depends(get_pagination)]
 
 
 # ---------- Helper dùng chung cho router ----------
-def get_tags_by_ids(db: Session, tag_ids: list[int]) -> list[Tag]:
-    """Body tham chiếu tới tag không tồn tại -> 400 (khác 404 dành cho resource trên URL)."""
-    tags = crud.tag.get_many(db, tag_ids)
-    missing = set(tag_ids) - {tag.id for tag in tags}
+def get_labels_by_ids(db: Session, project_id: int, label_ids: list[int]) -> list[Label]:
+    """Body tham chiếu label không tồn tại / thuộc project khác -> 400 (404 dành cho URL).
+    Khóa chia sẻ các label tới hết request: không bị xóa trong lúc đang gắn vào task."""
+    labels = crud.label.get_many_in_project(db, project_id, label_ids, for_share=True)
+    missing = set(label_ids) - {label.id for label in labels}
     if missing:
-        raise BadRequestException(messages.TAG_IDS_NOT_FOUND.format(ids=sorted(missing)))
-    return tags
+        raise BadRequestException(messages.LABEL_IDS_NOT_FOUND.format(ids=sorted(missing)))
+    return labels

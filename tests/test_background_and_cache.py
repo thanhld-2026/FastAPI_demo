@@ -1,4 +1,4 @@
-"""Mục 7: Background task gửi email và cache Redis cho danh sách tag."""
+"""Mục 7: Background task gửi email và cache Redis cho danh sách label của project."""
 
 import logging
 
@@ -6,8 +6,10 @@ import fakeredis
 import pytest
 import redis
 
-from app import cache
+from app import cache, crud
+from app.models import Label
 from app.services import email as email_service
+from app.services import labels as label_service
 
 
 # ---------- Background tasks ----------
@@ -110,58 +112,102 @@ def fake_redis(monkeypatch) -> fakeredis.FakeRedis:
     return client
 
 
-def test_tags_are_cached_and_invalidated_on_change(client, make_user, make_tag, fake_redis):
-    headers = make_user("alice")["headers"]
-    make_tag("backend")
+def test_labels_are_cached_per_project_and_invalidated_on_change(
+    client, make_user, make_project, make_label, fake_redis
+):
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    other = make_project(pm, name="Other")
+    make_label(project, pm, "backend")
+    make_label(other, pm, "mobile")
+    url = f"/api/v1/projects/{project['id']}/labels"
+    other_url = f"/api/v1/projects/{other['id']}/labels"
+    headers = pm["headers"]
 
-    first = client.get("/api/v1/tags", headers=headers)
-    second = client.get("/api/v1/tags", headers=headers)
-    make_tag("frontend")  # tạo tag mới -> xóa cache
-    third = client.get("/api/v1/tags", headers=headers)
+    first = client.get(url, headers=headers)
+    second = client.get(url, headers=headers)
+    client.get(other_url, headers=headers)  # nạp cache project khác
+    make_label(project, pm, "frontend")  # label mới -> chỉ xóa cache của project này
+    third = client.get(url, headers=headers)
+    other_again = client.get(other_url, headers=headers)
 
     assert first.headers["X-Cache"] == "MISS"
     assert second.headers["X-Cache"] == "HIT"
     assert second.json() == first.json()
     assert third.headers["X-Cache"] == "MISS"
-    assert [t["name"] for t in third.json()] == ["backend", "frontend"]
-    assert fake_redis.ttl("taskhub:tags:all") > 0  # cache có thời hạn
+    assert [lb["name"] for lb in third.json()] == ["backend", "frontend"]
+    assert other_again.headers["X-Cache"] == "HIT"  # project khác không bị ảnh hưởng
+    data_keys = fake_redis.keys(f"taskhub:projects:{project['id']}:labels:v[0-9]*")
+    assert data_keys and all(fake_redis.ttl(key) > 0 for key in data_keys)  # cache có thời hạn
 
 
-def test_tags_work_without_redis(client, make_user, make_tag):
-    headers = make_user("alice")["headers"]
-    make_tag("backend")
+def test_slow_reader_cannot_put_old_labels_back_into_cache(
+    client, db, make_user, make_project, make_label, fake_redis, monkeypatch
+):
+    """Request A đọc DB (danh sách cũ), trong lúc đó B thêm label + làm mới cache, rồi A mới ghi
+    cache: dữ liệu cũ của A không được che mất label của B ở các lần đọc sau."""
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    make_label(project, pm, "backend")
+    url = f"/api/v1/projects/{project['id']}/labels"
+    original = crud.label.list_for_project
 
-    resp = client.get("/api/v1/tags", headers=headers)
+    def slow_read(session, project_id):
+        labels = original(session, project_id)  # A đọc xong danh sách cũ...
+        db.add(Label(project_id=project_id, name="frontend", color="#000000"))
+        db.commit()
+        label_service.invalidate_cache(project_id)  # ...thì B thêm label, commit, làm mới cache
+        return labels
+
+    monkeypatch.setattr(crud.label, "list_for_project", slow_read)
+    stale = client.get(url, headers=pm["headers"])
+    monkeypatch.setattr(crud.label, "list_for_project", original)
+    fresh = client.get(url, headers=pm["headers"])
+
+    assert [lb["name"] for lb in stale.json()] == ["backend"]
+    assert fresh.headers["X-Cache"] == "MISS"
+    assert [lb["name"] for lb in fresh.json()] == ["backend", "frontend"]
+
+
+def test_deleted_project_leaves_no_label_cache_behind(
+    client, make_user, make_project, make_label, fake_redis
+):
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    make_label(project, pm, "old")
+    url = f"/api/v1/projects/{project['id']}/labels"
+    client.get(url, headers=pm["headers"])  # nạp cache
+
+    client.delete(f"/api/v1/projects/{project['id']}", headers=pm["headers"])
+    # SQLite cấp lại id vừa xóa cho project mới: cache cũ mà còn thì project mới thấy label "old"
+    reborn = make_project(pm, name="New", workspace={"id": project["workspace_id"]})
+    resp = client.get(f"/api/v1/projects/{reborn['id']}/labels", headers=pm["headers"])
+
+    assert reborn["id"] == project["id"]
+    assert (resp.headers["X-Cache"], resp.json()) == ("MISS", [])
+
+
+def test_labels_work_without_redis(client, make_user, make_project, make_label):
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    make_label(project, pm, "backend")
+
+    resp = client.get(f"/api/v1/projects/{project['id']}/labels", headers=pm["headers"])
 
     assert resp.status_code == 200
     assert resp.headers["X-Cache"] == "MISS"
 
 
-def test_tags_fall_back_to_database_when_redis_is_down(
-    client, make_user, make_tag, monkeypatch
+def test_labels_fall_back_to_database_when_redis_is_down(
+    client, make_user, make_project, make_label, monkeypatch
 ):
-    headers = make_user("alice")["headers"]
     unreachable = redis.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.2)
     monkeypatch.setattr(cache, "get_redis", lambda: unreachable)
-    make_tag("backend")
+    pm = make_user("pmuser")
+    project = make_project(pm)
+    make_label(project, pm, "backend")
 
-    resp = client.get("/api/v1/tags", headers=headers)
+    resp = client.get(f"/api/v1/projects/{project['id']}/labels", headers=pm["headers"])
 
     assert resp.status_code == 200
-    assert [t["name"] for t in resp.json()] == ["backend"]
-
-
-def test_only_admin_can_manage_tags(client, make_user):
-    member = make_user("member")
-    admin = make_user("boss", admin=True)
-
-    forbidden = client.post("/api/v1/tags", json={"name": "x"}, headers=member["headers"])
-    created = client.post("/api/v1/tags", json={"name": "  Backend "}, headers=admin["headers"])
-    duplicate = client.post("/api/v1/tags", json={"name": "backend"}, headers=admin["headers"])
-    deleted = client.delete(f"/api/v1/tags/{created.json()['id']}", headers=admin["headers"])
-
-    assert forbidden.status_code == 403
-    assert created.status_code == 201
-    assert created.json()["name"] == "backend"  # chuẩn hóa chữ thường + cắt khoảng trắng
-    assert duplicate.status_code == 409
-    assert deleted.status_code == 204
+    assert [lb["name"] for lb in resp.json()] == ["backend"]

@@ -49,3 +49,7 @@ class ActivityAction(StrEnum):
     UPDATED = "updated"
     ASSIGNED = "assigned"
     COMMENTED = "commented"
+    # Action riêng cho label (không gộp vào UPDATED) để FE lọc được lịch sử gắn / gỡ label.
+    # Cột lưu VARCHAR (native_enum=False) nên thêm giá trị không cần migration.
+    LABEL_ADDED = "label_added"
+    LABEL_REMOVED = "label_removed"

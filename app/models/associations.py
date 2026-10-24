@@ -9,12 +9,15 @@ from sqlalchemy import Column, ForeignKey, Table, func
 from app.database import Base
 from app.models.base import UTCDateTime
 
-# Task <-> Tag: 1 task có nhiều tag, 1 tag gắn cho nhiều task
-task_tags = Table(
-    "task_tags",
+# Task <-> Label: 1 task có nhiều label, 1 label gắn cho nhiều task (cùng project)
+# Giới hạn đã biết: "label phải cùng project với task" chỉ được kiểm tra trong code
+# (get_labels_by_ids, set_task_label), DB không chặn. Muốn DB chặn thì thêm cột project_id vào
+# task_labels + khóa ngoại kép (task_id, project_id) -> tasks, (label_id, project_id) -> labels.
+task_labels = Table(
+    "task_labels",
     Base.metadata,
     Column("task_id", ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True),
-    Column("tag_id", ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True, index=True),
+    Column("label_id", ForeignKey("labels.id", ondelete="CASCADE"), primary_key=True, index=True),
 )
 
 # User <-> Task (bookmark): 1 user bookmark nhiều task, 1 task được nhiều user bookmark

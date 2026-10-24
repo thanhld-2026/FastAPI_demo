@@ -41,8 +41,14 @@ ACTIVITY_DETAIL_MAX_LENGTH = 255
 # --- Comment ---
 COMMENT_MAX_LENGTH = 2000
 
-# --- Tag ---
-TAG_NAME_MAX_LENGTH = 30
+# --- Label (theo từng project) ---
+LABEL_NAME_MAX_LENGTH = 30
+# Giống tag cũ: chữ thường, số, gạch ngang (vd "bug", "needs-review");
+# không khoảng trắng, không xuống dòng
+LABEL_NAME_PATTERN = r"^[a-z0-9-]+$"
+LABEL_COLOR_PATTERN = r"^#[0-9a-fA-F]{6}$"  # mã màu hex, vd #EF4444
+LABEL_COLOR_LENGTH = 7
+DEFAULT_LABEL_COLOR = "#6b7280"
 
 # --- Request id (header X-Request-ID) ---
 # Chỉ nhận id client gửi lên nếu đúng định dạng, không thì tự sinh (tránh làm bẩn log)

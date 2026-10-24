@@ -7,11 +7,11 @@ from app.core import messages
 from app.core.constants import REQUIRED_TEXT_MIN_LENGTH, TASK_TITLE_MAX_LENGTH
 from app.models.enums import ActivityAction, TaskPriority, TaskStatus
 from app.schemas.common import InputSchema, ORMSchema, reject_null_fields
-from app.schemas.tag import TagOut
+from app.schemas.label import LabelOut
 from app.schemas.user import UserPublic
 
 # [1, 2, 2] -> [1, 2]: bỏ id trùng nhưng giữ nguyên thứ tự
-TagIds = Annotated[list[int], AfterValidator(lambda ids: list(dict.fromkeys(ids)))]
+LabelIds = Annotated[list[int], AfterValidator(lambda ids: list(dict.fromkeys(ids)))]
 
 
 def _not_in_past(value: date | None) -> date | None:
@@ -45,7 +45,7 @@ class TaskCreate(InputSchema):
     status: TaskStatus = TaskStatus.TODO
     priority: TaskPriority = TaskPriority.MEDIUM
     due_date: DueDate = None
-    tag_ids: TagIds = Field(default_factory=list, examples=[[1, 2]])
+    label_ids: LabelIds = Field(default_factory=list, examples=[[1, 2]])
 
 
 class TaskUpdate(InputSchema):
@@ -56,12 +56,12 @@ class TaskUpdate(InputSchema):
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
     due_date: DueDate = None
-    tag_ids: TagIds | None = None
+    label_ids: LabelIds | None = None
 
     @model_validator(mode="after")
     def _reject_null_required(self):
         # description/due_date được phép null (xóa giá trị), còn các field NOT NULL thì không
-        reject_null_fields(self, "title", "status", "priority", "tag_ids")
+        reject_null_fields(self, "title", "status", "priority", "label_ids")
         return self
 
 
@@ -93,7 +93,7 @@ class TaskOut(ORMSchema):
     project_id: int
     creator: UserPublic
     assignee: UserPublic | None
-    tags: list[TagOut]
+    labels: list[LabelOut]
     created_at: datetime
     updated_at: datetime
 

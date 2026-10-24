@@ -1,6 +1,7 @@
 """Mục 8: Health check, CORS, request id, xử lý lỗi toàn cục."""
 
 from app import crud
+from app.config import Settings
 
 
 def test_health(client):
@@ -46,16 +47,18 @@ def test_cors_rejects_unknown_origin(client):
     assert "access-control-allow-origin" not in resp.headers
 
 
-def test_unhandled_error_returns_generic_500(client, make_user, monkeypatch):
-    def broken_list_tags(db):
+def test_unhandled_error_returns_generic_500(client, make_user, make_project, monkeypatch):
+    pm = make_user("pmuser")
+    project = make_project(pm)
+
+    def broken_list(db, project_id):
         raise RuntimeError("database exploded: SELECT * FROM secret_table")
 
-    user = make_user("alice")
-    monkeypatch.setattr(crud.tag, "list_tags", broken_list_tags)
+    monkeypatch.setattr(crud.label, "list_for_project", broken_list)
 
     resp = client.get(
-        "/api/v1/tags",
-        headers={**user["headers"], "X-Request-ID": "req-500", "Origin": "http://localhost:3000"},
+        f"/api/v1/projects/{project['id']}/labels",
+        headers={**pm["headers"], "X-Request-ID": "req-500", "Origin": "http://localhost:3000"},
     )
 
     assert resp.status_code == 500
@@ -64,3 +67,11 @@ def test_unhandled_error_returns_generic_500(client, make_user, monkeypatch):
     # Response 500 vẫn đi qua CORS + middleware log -> FE đọc được lỗi và request id
     assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"
     assert resp.headers["X-Request-ID"] == "req-500"
+
+
+def test_old_tags_cache_ttl_setting_is_still_read(monkeypatch):
+    """Biến môi trường đổi tên (tag -> label): .env cũ vẫn dùng được, không bị bỏ qua âm thầm."""
+    monkeypatch.delenv("LABELS_CACHE_TTL", raising=False)
+    monkeypatch.setenv("TAGS_CACHE_TTL", "42")
+
+    assert Settings(_env_file=None).LABELS_CACHE_TTL == 42

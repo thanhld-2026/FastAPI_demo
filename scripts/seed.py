@@ -15,8 +15,8 @@ from app.database import SessionLocal
 from app.models import (
     ActivityAction,
     Comment,
+    Label,
     Project,
-    Tag,
     Task,
     TaskActivity,
     TaskPriority,
@@ -46,7 +46,16 @@ WORKSPACES = [
     ("Mobile Team", "bob", [("carol", "EDITOR"), ("dave", "EDITOR")]),
 ]
 
-TAGS = ["backend", "frontend", "mobile", "bug", "feature", "docs", "urgent"]
+# Label theo từng project: tên -> màu
+LABEL_COLORS = {
+    "backend": "#2563eb",
+    "frontend": "#9333ea",
+    "mobile": "#0891b2",
+    "bug": "#dc2626",
+    "feature": "#16a34a",
+    "docs": "#6b7280",
+    "urgent": "#ea580c",
+}
 
 
 def seed() -> None:
@@ -65,8 +74,7 @@ def seed() -> None:
             )
             for name, full_name, role in USERS
         }
-        tags = {name: Tag(name=name) for name in TAGS}
-        db.add_all([*users.values(), *tags.values()])
+        db.add_all(users.values())
         # flush: gửi INSERT xuống DB (có id) nhưng CHƯA commit -> vẫn chung 1 transaction.
         # Flush từng bước để id sinh ra theo đúng thứ tự khai báo, dễ theo dõi khi demo.
         db.flush()
@@ -98,11 +106,11 @@ def seed() -> None:
 
         today = date.today()
         task_specs = [
-            # project, title, status, priority, creator, assignee, tags, due_in_days
+            # project, title, status, priority, creator, assignee, labels, due_in_days
             (backend, "Thiết kế database & ERD", TaskStatus.DONE, TaskPriority.HIGH, "alice", "carol", ["backend", "docs"], -7),
             (backend, "API đăng ký / đăng nhập JWT", TaskStatus.DONE, TaskPriority.HIGH, "alice", "carol", ["backend", "feature"], -3),
             (backend, "Phân quyền theo workspace (RBAC)", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, "alice", "dave", ["backend", "feature"], 2),
-            (backend, "Cache danh sách tag bằng Redis", TaskStatus.TODO, TaskPriority.MEDIUM, "carol", None, ["backend"], 5),
+            (backend, "Cache danh sách label bằng Redis", TaskStatus.TODO, TaskPriority.MEDIUM, "carol", None, ["backend"], 5),
             (backend, "Viết integration test", TaskStatus.IN_REVIEW, TaskPriority.MEDIUM, "alice", "dave", ["backend", "docs"], 7),
             (backend, "Fix lỗi 500 khi token hết hạn", TaskStatus.TODO, TaskPriority.HIGH, "dave", None, ["bug", "urgent"], 1),
             (mobile, "Màn hình đăng nhập", TaskStatus.IN_PROGRESS, TaskPriority.HIGH, "bob", "carol", ["mobile", "frontend"], 3),
@@ -110,8 +118,19 @@ def seed() -> None:
             (mobile, "Push notification khi có comment", TaskStatus.TODO, TaskPriority.LOW, "bob", "dave", ["mobile"], 14),
         ]
 
+        # Mỗi project chỉ có các label mà task của nó dùng tới
+        labels: dict[tuple[int, str], Label] = {}
+        for project, *_, label_names, _ in task_specs:
+            for name in label_names:
+                if (project.id, name) not in labels:
+                    labels[project.id, name] = Label(
+                        project=project, name=name, color=LABEL_COLORS[name]
+                    )
+        db.add_all(labels.values())
+        db.flush()
+
         tasks: list[Task] = []
-        for project, title, status, priority, creator, assignee, tag_names, due_in in task_specs:
+        for project, title, status, priority, creator, assignee, label_names, due_in in task_specs:
             task = Task(
                 project=project,
                 title=title,
@@ -119,7 +138,7 @@ def seed() -> None:
                 priority=priority,
                 creator=users[creator],
                 assignee=users[assignee] if assignee else None,
-                tags=[tags[name] for name in tag_names],
+                labels=[labels[project.id, name] for name in label_names],
                 due_date=today + timedelta(days=due_in),
             )
             task.activities.append(TaskActivity(actor=users[creator], action=ActivityAction.CREATED))

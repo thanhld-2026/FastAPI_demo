@@ -5,7 +5,7 @@ pydantic-settings dùng python-dotenv để đọc file .env, sau đó validate 
 biến môi trường thật > file .env > giá trị mặc định trong class.
 """
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,7 +39,10 @@ class Settings(BaseSettings):
 
     # --- Redis cache ---
     REDIS_URL: str | None = None  # None / rỗng -> tắt cache
-    TAGS_CACHE_TTL: int = 300  # giây
+    # giây; vẫn đọc tên cũ TAGS_CACHE_TTL (trước khi tag thành label) để .env cũ không bị bỏ qua
+    LABELS_CACHE_TTL: int = Field(
+        default=300, ge=1, validation_alias=AliasChoices("LABELS_CACHE_TTL", "TAGS_CACHE_TTL")
+    )
     REDIS_SOCKET_TIMEOUT: float = 1.0  # giây; Redis chết -> fail nhanh, không treo request
 
     # --- Email ---

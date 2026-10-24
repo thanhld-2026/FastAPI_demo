@@ -9,7 +9,7 @@ RESTful API quản lý **project** và **task** (giống Jira/Trello thu nhỏ),
 | Database | PostgreSQL 17 (driver psycopg 3) |
 | Validate dữ liệu | Pydantic v2, pydantic-settings, python-dotenv |
 | Xác thực | OAuth2 Password Flow, JWT access token + refresh token (rotation, thu hồi được), bcrypt |
-| Cache | Redis |
+| Cache | Redis (danh sách label của từng project, cache-aside + TTL) |
 | Email (dev) | Mailpit (SMTP giả lập, có giao diện web) |
 | Test | pytest + TestClient + SQLite in-memory + fakeredis |
 | Triển khai | Docker + docker-compose |
@@ -82,7 +82,7 @@ Phiên đăng nhập gồm 2 token:
 ## 4. Chạy test & lint
 
 ```bash
-pytest          # 124 test (+7 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
+pytest          # 140 test (+9 test PostgreSQL), khoảng 15 giây, KHÔNG cần Docker/PostgreSQL/Redis
 pytest -v tests/test_tasks.py::test_register_login_and_create_task_flow   # integration test bắt buộc của đề
 # Test khóa dòng (FOR SHARE / FOR UPDATE) cần PostgreSQL thật, DB rỗng dành riêng cho test:
 # (test xóa / tạo lại toàn bộ bảng nên tên DB bắt buộc kết thúc bằng _test, nếu không test dừng ngay)
@@ -162,10 +162,16 @@ Quy ước:
   response có `total` và `pages` (tổng số trang, tối thiểu 1). `page` vượt quá `pages` trả
   `items` rỗng. Tham số cũ `skip` bị từ chối (422) để client cũ không âm thầm nhận mãi trang 1.
 - Task: status `TODO` / `IN_PROGRESS` / `IN_REVIEW` / `DONE`, priority `LOW` / `MEDIUM` / `HIGH` / `URGENT`.
+- Label thuộc từng project (tên chỉ gồm chữ thường, số, gạch ngang như tag cũ, chữ hoa tự đổi
+  thành chữ thường; không trùng trong project; màu hex), chỉ gắn
+  được label của đúng project chứa task. Gắn / gỡ label cập nhật `updated_at` của task và ghi
+  activity riêng `label_added` / `label_removed` (FE lọc được); xóa label thì ghi `label_removed`
+  cho từng task đang dùng nó.
+  Danh sách label được cache Redis theo project, có version: thêm / sửa / xóa label (hoặc xóa
+  project) thì tăng version của project đó, cache cũ không bao giờ được đọc lại.
 - Project: `ACTIVE` / `ARCHIVED`. Chỉ project `ACTIVE` mới ghi được: project đã archive thì chính
-  project, task và comment bên trong chỉ đọc được (mọi thao tác ghi, kể cả sửa / xóa project, trả
-  `409`), OWNER / Admin unarchive để mở lại. 2 ngoại lệ có chủ đích: bookmark (dữ liệu cá nhân) và admin
-  xóa tag (tag dùng chung toàn hệ thống, task trong project archive mất tag đó).
+  project, task, comment và label bên trong chỉ đọc được (mọi thao tác ghi, kể cả sửa / xóa project,
+  trả `409`), OWNER / Admin unarchive để mở lại. Ngoại lệ có chủ đích: bookmark (dữ liệu cá nhân).
 - Cột "Mục đề": số mục của tutorial; `PL n` là feature n trong phụ lục đặc tả sample app.
 
 | Method | Endpoint | Quyền | Mục đề |
@@ -204,8 +210,10 @@ Quy ước:
 | GET | `/api/v1/tasks/{task_id}/activities` | VIEWER (phân trang) | 6 |
 | GET / POST | `/api/v1/tasks/{task_id}/comments` | GET: VIEWER (phân trang), POST: EDITOR (gửi email ngầm) | 6, 7 |
 | PUT / DELETE | `/api/v1/tasks/{task_id}/comments/{comment_id}` | Tác giả (EDITOR) / OWNER | 6 |
-| GET | `/api/v1/tags` | Đã đăng nhập (cache Redis) | 2, 7 |
-| POST / DELETE | `/api/v1/tags`, `/api/v1/tags/{tag_id}` | Admin | 7 |
+| GET | `/api/v1/projects/{project_id}/labels` | VIEWER (cache Redis, header `X-Cache`) | 2, 7, PL 6 |
+| POST | `/api/v1/projects/{project_id}/labels` | EDITOR (tên không trùng trong project) | PL 6 |
+| PATCH / DELETE | `/api/v1/labels/{label_id}` | EDITOR (xóa: tự gỡ khỏi các task) | PL 6 |
+| POST / DELETE | `/api/v1/tasks/{task_id}/labels/{label_id}` | EDITOR, label cùng project (idempotent) | PL 6 |
 | GET | `/health` | Công khai | 8 |
 
 Lỗi luôn trả về dạng `{"detail": "..."}`, mã lỗi của từng endpoint được document trên Swagger:
@@ -213,8 +221,9 @@ Lỗi luôn trả về dạng `{"detail": "..."}`, mã lỗi của từng endpoi
 - `401`: chưa đăng nhập hoặc token sai/hết hạn.
 - `403`: là thành viên nhưng role không đủ (hoặc tài khoản bị khóa).
 - `404`: resource trên URL không tồn tại, hoặc không phải thành viên workspace chứa nó.
-- `400`: body tham chiếu tới dữ liệu không tồn tại (tag_ids, assignee_id).
-- `409`: trùng dữ liệu (email, tag) hoặc project đã archive.
+- `400`: body tham chiếu tới dữ liệu không tồn tại (label_ids, assignee_id, email được mời).
+- `409`: trùng dữ liệu (email, tên label, thành viên) hoặc xung đột trạng thái
+  (project đã archive, xóa workspace còn project).
 - `422`: dữ liệu sai định dạng.
 
 Giới hạn / quyết định có chủ đích:
@@ -222,3 +231,5 @@ Giới hạn / quyết định có chủ đích:
 - Mời thành viên theo email là thêm thẳng (không cần người được mời đồng ý, họ tự rời được), và
   ai tạo workspace cũng biết được 1 email đã đăng ký hay chưa (400 khác 201). Chấp nhận trong phạm vi
   bài thực hành; bản đầy đủ cần lời mời chờ chấp nhận + cùng 1 response cho mọi email.
+- Quy tắc "label phải cùng project với task" mới được kiểm tra trong code, DB chưa chặn (cần thêm
+  `project_id` vào `task_labels` + khóa ngoại kép, xem `app/models/associations.py`).

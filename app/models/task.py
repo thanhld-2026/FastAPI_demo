@@ -8,15 +8,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import TASK_TITLE_MAX_LENGTH
 from app.database import Base
-from app.models.associations import task_bookmarks, task_tags
+from app.models.associations import task_bookmarks, task_labels
 from app.models.base import TimestampMixin, enum_column
 from app.models.enums import TaskPriority, TaskStatus
 
 if TYPE_CHECKING:
     from app.models.activity import TaskActivity
     from app.models.comment import Comment
+    from app.models.label import Label
     from app.models.project import Project
-    from app.models.tag import Tag
     from app.models.user import User
 
 
@@ -57,8 +57,8 @@ class Task(TimestampMixin, Base):
         foreign_keys=[assignee_id], back_populates="assigned_tasks"
     )
     # Many-to-Many
-    tags: Mapped[list[Tag]] = relationship(
-        secondary=task_tags, back_populates="tasks", order_by="Tag.name"
+    labels: Mapped[list[Label]] = relationship(
+        secondary=task_labels, back_populates="tasks", order_by="Label.name", passive_deletes=True
     )
     bookmarked_by: Mapped[list[User]] = relationship(
         secondary=task_bookmarks, back_populates="bookmarked_tasks"

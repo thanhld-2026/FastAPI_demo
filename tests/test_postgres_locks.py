@@ -1,4 +1,5 @@
-"""Khóa dòng (archive / sửa project, giao task / đổi role thành viên), chạy trên PostgreSQL thật.
+"""Khóa dòng (archive / sửa project, giao task / đổi role thành viên, gắn / xóa label), chạy trên
+PostgreSQL thật.
 
 SQLite (dùng cho các test khác) bỏ qua FOR SHARE / FOR UPDATE nên không kiểm tra được.
 Chạy riêng, trên 1 DB chỉ dành cho test (test sẽ XÓA / tạo lại toàn bộ bảng, nên tên DB bắt
@@ -25,7 +26,17 @@ from sqlalchemy.orm import Session, sessionmaker
 from app import crud
 from app.database import Base, get_db
 from app.main import app
-from app.models import Project, ProjectStatus, User, Workspace, WorkspaceMember, WorkspaceRole
+from app.models import (
+    ActivityAction,
+    Label,
+    Project,
+    ProjectStatus,
+    Task,
+    User,
+    Workspace,
+    WorkspaceMember,
+    WorkspaceRole,
+)
 from tests.conftest import DEFAULT_PASSWORD
 
 PG_URL = os.environ.get("TEST_POSTGRES_URL")
@@ -65,11 +76,13 @@ class Ids:
     project: int
     workspace: int
     editor: int
+    task: int
+    label: int
 
 
 @pytest.fixture
 def ids(pg_session_factory: sessionmaker[Session]) -> Ids:
-    """Workspace (owner + 1 EDITOR) chứa 1 project."""
+    """Workspace (owner + 1 EDITOR) chứa 1 project, có 1 task và 1 label."""
     with pg_session_factory() as db:
         owner = User(full_name="owner", email="owner@example.com", hashed_password="x")
         editor = User(full_name="carol", email="carol@example.com", hashed_password="x")
@@ -77,9 +90,11 @@ def ids(pg_session_factory: sessionmaker[Session]) -> Ids:
         workspace.members.append(WorkspaceMember(user=owner, role=WorkspaceRole.OWNER))
         workspace.members.append(WorkspaceMember(user=editor, role=WorkspaceRole.EDITOR))
         project = Project(name="TaskHub", workspace=workspace, creator=owner)
-        db.add(project)
+        task = Task(title="Login API", project=project, creator=owner)
+        label = Label(name="bug", color="#dc2626", project=project)
+        db.add_all([task, label])
         db.commit()
-        return Ids(project=project.id, workspace=workspace.id, editor=editor.id)
+        return Ids(project.id, workspace.id, editor.id, task.id, label.id)
 
 
 @pytest.fixture
@@ -168,6 +183,50 @@ def test_member_cannot_be_demoted_while_a_task_is_being_assigned_to_them(pg_sess
         assigner.rollback()
         assigner.close()
         owner.close()
+
+
+def test_label_cannot_be_deleted_while_being_attached(pg_session_factory, ids):
+    """Gắn label đọc label bằng FOR SHARE -> xóa label (FOR UPDATE) phải chờ: không có cảnh
+    INSERT task_labels trỏ tới label vừa bị xóa (lỗi khóa ngoại -> 500)."""
+    attacher = pg_session_factory()
+    deleter = pg_session_factory()
+    try:
+        assert crud.label.get_in_project(attacher, ids.project, ids.label, for_share=True)
+        deleter.execute(text("SET lock_timeout = '300ms'"))
+
+        with pytest.raises(OperationalError):
+            crud.label.get_for_update(deleter, ids.label)
+    finally:
+        deleter.rollback()
+        attacher.rollback()
+        attacher.close()
+        deleter.close()
+
+
+def test_label_changes_of_one_task_run_one_at_a_time(pg_session_factory, ids):
+    """2 request đổi label của cùng 1 task chạy lần lượt (FOR NO KEY UPDATE dòng task), nhưng
+    không chặn request khác ghi activity / comment cho task đó (khóa ngoại tới task)."""
+    first = pg_session_factory()
+    second = pg_session_factory()
+    other = pg_session_factory()
+    try:
+        crud.task.lock_label_set(first, first.get_one(Task, ids.task))
+        second.execute(text("SET lock_timeout = '300ms'"))
+        other.execute(text("SET lock_timeout = '300ms'"))
+
+        with pytest.raises(OperationalError):
+            crud.task.lock_label_set(second, second.get_one(Task, ids.task))
+        crud.activity.add(
+            other,
+            task=other.get_one(Task, ids.task),
+            actor=other.get_one(User, ids.editor),
+            action=ActivityAction.COMMENTED,
+        )
+        other.flush()  # INSERT có khóa ngoại tới task: không phải chờ
+    finally:
+        for session in (other, second, first):
+            session.rollback()
+            session.close()
 
 
 # ---------- Đi qua HTTP: router + dependency thật ----------

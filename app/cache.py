@@ -53,11 +53,34 @@ def cache_set(key: str, value: Any, ttl: int) -> None:
         logger.warning("Redis SET %s failed: %s", key, exc)
 
 
-def cache_delete(key: str) -> None:
+def cache_version(key: str) -> int | None:
+    """Phiên bản hiện tại của 1 nhóm cache (0 nếu chưa có). None nếu Redis tắt / lỗi -> bỏ qua
+    cache, đọc thẳng DB."""
+    client = get_redis()
+    if client is None:
+        return None
+    try:
+        raw = client.get(key)
+    except redis.RedisError as exc:
+        logger.warning("Redis GET %s failed: %s", key, exc)
+        return None
+    return int(raw) if raw is not None else 0
+
+
+def cache_bump_version(key: str, ttl: int | None = None) -> None:
+    """INCR phiên bản: key dữ liệu của phiên bản cũ không còn được đọc nữa, tự hết hạn theo TTL.
+
+    Khác xóa key: request đọc DB TRƯỚC khi dữ liệu đổi mà ghi cache SAU khi đã xóa key sẽ đưa
+    dữ liệu cũ trở lại cache. Với version, request đó chỉ ghi vào key của phiên bản cũ.
+    """
     client = get_redis()
     if client is None:
         return
     try:
-        client.delete(key)
+        with client.pipeline() as pipe:
+            pipe.incr(key)
+            if ttl is not None:
+                pipe.expire(key, ttl)
+            pipe.execute()
     except redis.RedisError as exc:
-        logger.warning("Redis DELETE %s failed: %s", key, exc)
+        logger.warning("Redis INCR %s failed: %s", key, exc)

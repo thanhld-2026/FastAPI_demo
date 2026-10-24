@@ -1,5 +1,6 @@
 from sqlalchemy import ColumnElement, Select, exists, func, insert, select
 from sqlalchemy import delete as sql_delete
+from sqlalchemy import update as sql_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -7,26 +8,27 @@ from app.crud import activity as activity_crud
 from app.crud.workspace import visible_to
 from app.models import (
     ActivityAction,
+    Label,
     Project,
     ProjectStatus,
-    Tag,
     Task,
     TaskPriority,
     TaskStatus,
     User,
     task_bookmarks,
+    task_labels,
 )
 from app.schemas.common import PageParams
 from app.schemas.task import TaskCreate, TaskUpdate
 
 # Eager loading dùng chung cho mọi query trả về TaskOut.
 # Không có dòng này: trả về 20 task -> 1 query lấy task + 20 query creator
-# + 20 query assignee + 20 query tags = 61 query (N+1 problem).
-# Có dòng này: luôn chỉ 2 query (task JOIN users, và 1 query lấy tags).
+# + 20 query assignee + 20 query labels = 61 query (N+1 problem).
+# Có dòng này: luôn chỉ 2 query (task JOIN users, và 1 query lấy labels).
 TASK_LOAD_OPTIONS = (
     joinedload(Task.creator),  # Many-to-One -> LEFT OUTER JOIN
     joinedload(Task.assignee),  # Many-to-One -> LEFT OUTER JOIN
-    selectinload(Task.tags),  # Many-to-Many -> SELECT ... WHERE task_id IN (...)
+    selectinload(Task.labels),  # Many-to-Many -> SELECT ... WHERE task_id IN (...)
 )
 
 
@@ -123,25 +125,71 @@ def list_tasks(
 
 
 def create(
-    db: Session, *, project: Project, data: TaskCreate, tags: list[Tag], creator: User
+    db: Session, *, project: Project, data: TaskCreate, labels: list[Label], creator: User
 ) -> Task:
-    task = Task(**data.model_dump(exclude={"tag_ids"}), project=project, creator=creator, tags=tags)
+    values = data.model_dump(exclude={"label_ids"})
+    task = Task(**values, project=project, creator=creator, labels=labels)
     db.add(task)
     activity_crud.add(db, task=task, actor=creator, action=ActivityAction.CREATED)
     db.commit()  # task + activity được lưu trong cùng 1 transaction
     return _reload(db, task.id)
 
 
+def lock_label_set(db: Session, task: Task) -> None:
+    """Khóa dòng task (SELECT ... FOR NO KEY UPDATE) rồi đọc lại tập label: các request cùng
+    gắn / gỡ label của 1 task chạy lần lượt. Không khóa thì 2 request cùng gắn 1 label -> INSERT
+    trùng khóa chính, cùng gỡ -> ORM DELETE không trúng dòng nào (StaleDataError) -> 500.
+
+    NO KEY UPDATE thay vì UPDATE: không chặn request khác thêm comment / activity cho task.
+    Thứ tự khóa luôn là label (FOR SHARE) trước, task sau, giống lúc xóa label -> không deadlock.
+    """
+    db.execute(select(Task.id).where(Task.id == task.id).with_for_update(key_share=True))
+    db.expire(task, ["labels"])
+
+
+def lock_tasks_with_label(db: Session, label_id: int) -> list[Task]:
+    """Task đang gắn label (khóa theo thứ tự id: 2 request khóa nhiều task không chờ vòng nhau)."""
+    stmt = (
+        select(Task)
+        .join(task_labels, task_labels.c.task_id == Task.id)
+        .where(task_labels.c.label_id == label_id)
+        .order_by(Task.id)
+        .with_for_update(key_share=True, of=Task)
+    )
+    return list(db.scalars(stmt).all())
+
+
+def touch(db: Session, task_ids: list[int]) -> None:
+    """Đổi label chỉ ghi vào bảng task_labels, không sửa cột nào của tasks nên `onupdate` của
+    updated_at không chạy -> tự cập nhật."""
+    if task_ids:
+        db.execute(
+            sql_update(Task)
+            .where(Task.id.in_(task_ids))
+            .values(updated_at=func.now())
+            .execution_options(synchronize_session=False)
+        )
+
+
 def update(
-    db: Session, task: Task, data: TaskUpdate, *, tags: list[Tag] | None, actor: User
+    db: Session, task: Task, data: TaskUpdate, *, labels: list[Label] | None, actor: User
 ) -> Task:
-    values = data.model_dump(exclude_unset=True, exclude={"tag_ids"})
+    if labels is not None:
+        lock_label_set(db, task)
+    values = data.model_dump(exclude_unset=True, exclude={"label_ids"})
     changed = [field for field, value in values.items() if getattr(task, field) != value]
     for field, value in values.items():
         setattr(task, field, value)
-    if tags is not None and {t.id for t in task.tags} != {t.id for t in tags}:
-        task.tags = tags
-        changed.append("tags")
+    label_changes: list[tuple[ActivityAction, Label]] = []
+    if labels is not None:
+        old_ids, new_ids = {lb.id for lb in task.labels}, {lb.id for lb in labels}
+        removed = [lb for lb in task.labels if lb.id not in new_ids]
+        added = [lb for lb in labels if lb.id not in old_ids]
+        label_changes = [(ActivityAction.LABEL_REMOVED, lb) for lb in removed]
+        label_changes += [(ActivityAction.LABEL_ADDED, lb) for lb in added]
+        if label_changes:
+            task.labels = labels
+            touch(db, [task.id])
 
     if changed:
         activity_crud.add(
@@ -151,6 +199,8 @@ def update(
             action=ActivityAction.UPDATED,
             detail=f"changed: {', '.join(changed)}",
         )
+    for action, label in label_changes:  # mỗi label 1 activity, giống gắn / gỡ từng cái
+        add_label_activity(db, task=task, actor=actor, action=action, label_name=label.name)
     db.commit()
     return _reload(db, task.id)
 
@@ -180,6 +230,36 @@ def assign(db: Session, *, task: Task, assignee: User | None, actor: User) -> Ta
             action=ActivityAction.ASSIGNED,
             detail=f"assigned to {assignee.full_name}" if assignee else "unassigned",
         )
+        db.commit()
+    return _reload(db, task.id)
+
+
+def add_label_activity(
+    db: Session,
+    *,
+    task: Task,
+    actor: User,
+    action: ActivityAction,
+    label_name: str,
+    reason: str | None = None,
+) -> None:
+    verb = "added" if action == ActivityAction.LABEL_ADDED else "removed"
+    detail = f"{verb} label {label_name}" + (f" ({reason})" if reason else "")
+    activity_crud.add(db, task=task, actor=actor, action=action, detail=detail)
+
+
+def set_label(db: Session, *, task: Task, label: Label, attached: bool, actor: User) -> Task:
+    """Gắn / gỡ 1 label + ghi activity + cập nhật updated_at trong 1 commit. Idempotent: đã đúng
+    trạng thái thì không ghi gì (giống update khi không có field nào đổi)."""
+    lock_label_set(db, task)
+    if (label in task.labels) != attached:
+        if attached:
+            task.labels.append(label)
+        else:
+            task.labels.remove(label)
+        touch(db, [task.id])
+        action = ActivityAction.LABEL_ADDED if attached else ActivityAction.LABEL_REMOVED
+        add_label_activity(db, task=task, actor=actor, action=action, label_name=label.name)
         db.commit()
     return _reload(db, task.id)
 

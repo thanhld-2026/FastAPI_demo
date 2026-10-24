@@ -254,6 +254,11 @@ WRITE_ENDPOINTS = [
     # archive / unarchive chạy được ở mọi status nên không có 409
     pytest.param("POST", "/projects/{project}/archive", None, 403, 403, id="archive"),
     pytest.param("POST", "/projects/{project}/unarchive", None, 403, 403, id="unarchive"),
+    pytest.param("POST", "/projects/{project}/labels", {"name": "x"}, 409, 403, id="create-label"),
+    pytest.param("PATCH", "/labels/{label}", {"name": "y"}, 409, 403, id="update-label"),
+    pytest.param("DELETE", "/labels/{label}", None, 409, 403, id="delete-label"),
+    pytest.param("POST", "/tasks/{task}/labels/{label}", None, 409, 403, id="attach-label"),
+    pytest.param("DELETE", "/tasks/{task}/labels/{label}", None, 409, 403, id="detach-label"),
 ]
 
 
@@ -263,6 +268,7 @@ def test_error_order_of_write_endpoints(
     make_user,
     make_project,
     make_task,
+    make_label,
     add_member,
     method,
     path,
@@ -280,8 +286,10 @@ def test_error_order_of_write_endpoints(
     comment = client.post(
         f"/api/v1/tasks/{task['id']}/comments", json={"content": "hi"}, headers=owner["headers"]
     ).json()
-    url = "/api/v1" + path.format(project=project["id"], task=task["id"], comment=comment["id"])
-    missing_url = "/api/v1" + path.format(project=999, task=999, comment=999)
+    label = make_label(project, owner, "bug")
+    ids = {"project": project["id"], "task": task["id"], "comment": comment["id"]}
+    url = "/api/v1" + path.format(**ids, label=label["id"])
+    missing_url = "/api/v1" + path.format(project=999, task=999, comment=999, label=999)
     project_url = f"/api/v1/projects/{project['id']}"
 
     def call(target: str, user: dict | None = None):
@@ -309,27 +317,20 @@ def test_only_active_projects_accept_writes():
             _raise_if_not_writable(status, "not found")  # type: ignore[arg-type]
 
 
-def test_bookmark_and_admin_tag_delete_still_work_on_archived_project(
-    client, make_user, make_project, make_task, make_tag
-):
-    """2 ngoại lệ có chủ đích của quy tắc archive (xem dependencies.py): bookmark là dữ liệu cá
-    nhân; tag dùng chung toàn hệ thống nên admin vẫn xóa được, task archive mất tag đó."""
+def test_bookmark_still_works_on_archived_project(client, make_user, make_project, make_task):
+    """Ngoại lệ có chủ đích của quy tắc archive (xem dependencies.py): bookmark là dữ liệu cá
+    nhân của người xem, không sửa gì trong project."""
     owner = make_user("owner")
-    admin = make_user("boss", admin=True)
-    tag = make_tag("legacy")
     project = make_project(owner)
-    task = make_task(project["id"], owner, tag_ids=[tag["id"]])
-    task_url = f"/api/v1/tasks/{task['id']}"
+    task = make_task(project["id"], owner)
+    url = f"/api/v1/tasks/{task['id']}/bookmark"
     headers = owner["headers"]
     client.post(f"/api/v1/projects/{project['id']}/archive", headers=headers)
 
-    bookmarked = client.post(f"{task_url}/bookmark", headers=headers)
-    unbookmarked = client.delete(f"{task_url}/bookmark", headers=headers)
-    tag_deleted = client.delete(f"/api/v1/tags/{tag['id']}", headers=admin["headers"])
+    bookmarked = client.post(url, headers=headers)
+    unbookmarked = client.delete(url, headers=headers)
 
-    codes = (bookmarked.status_code, unbookmarked.status_code, tag_deleted.status_code)
-    assert codes == (200, 200, 204)
-    assert client.get(task_url, headers=headers).json()["tags"] == []
+    assert (bookmarked.status_code, unbookmarked.status_code) == (200, 200)
 
 
 def test_missing_comment_on_archived_project_is_404(client, make_user, make_project, make_task):

@@ -11,6 +11,7 @@ from app.models.base import TimestampMixin, enum_column
 from app.models.enums import ProjectStatus
 
 if TYPE_CHECKING:
+    from app.models.label import Label
     from app.models.task import Task
     from app.models.user import User
     from app.models.workspace import Workspace
@@ -42,7 +43,18 @@ class Project(TimestampMixin, Base):
 
     workspace: Mapped[Workspace] = relationship(back_populates="projects")
     creator: Mapped[User] = relationship(back_populates="created_projects")
-    # cascade="all, delete-orphan": xóa project -> xóa luôn các task thuộc project
+    # cascade="all, delete-orphan": xóa project -> xóa luôn task, label thuộc project.
+    # passive_deletes: phần chưa load để DB tự xóa (FK ON DELETE CASCADE), ORM không load
+    # từng task / label (cùng comment, activity...) lên rồi xóa từng dòng.
     tasks: Mapped[list[Task]] = relationship(
-        back_populates="project", cascade="all, delete-orphan", order_by="Task.id"
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="Task.id",
+        passive_deletes=True,
+    )
+    labels: Mapped[list[Label]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="Label.name",
+        passive_deletes=True,
     )

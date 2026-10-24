@@ -115,17 +115,19 @@ def make_user(client: TestClient, db: Session) -> Callable[..., dict]:
 
 
 @pytest.fixture
-def make_tag(client: TestClient, make_user) -> Callable[[str], dict]:
-    admin = None
+def make_label(client: TestClient) -> Callable[..., dict]:
+    """Tạo label trong project; `user` phải có role EDITOR trở lên trong workspace."""
 
-    def _make_tag(name: str) -> dict:
-        nonlocal admin
-        admin = admin or make_user("tag_admin", admin=True)
-        resp = client.post("/api/v1/tags", json={"name": name}, headers=admin["headers"])
+    def _make_label(project: dict, user: dict, name: str, color: str = "#2563eb") -> dict:
+        resp = client.post(
+            f"/api/v1/projects/{project['id']}/labels",
+            json={"name": name, "color": color},
+            headers=user["headers"],
+        )
         assert resp.status_code == 201, resp.text
         return resp.json()
 
-    return _make_tag
+    return _make_label
 
 
 @pytest.fixture
